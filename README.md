@@ -161,6 +161,33 @@ extraction accuracy, notably rupees-to-paise.
 Next: Razorpay test-mode settlement (needs no model, so it is not blocked),
 then the buyer agent over a mock merchant.
 
+## The rail: UPI Autopay
+
+Chosen over card mandates because `as_presented` — variable amount per debit —
+is native to UPI Autopay. That is the whole answer to *"why not just Razorpay
+Subscriptions?"*: Subscriptions governs a fixed schedule, and a static cap is
+provably insufficient for an agent whose basket total moves every run. Card
+mandates would cost us that story.
+
+Verified against Razorpay's docs before building:
+
+| Fact | Value |
+|---|---|
+| `as_presented` frequency | supported (also monthly, weekly) |
+| `max_amount` | paise; defaults to `9999900` (₹99,999), min ₹1 |
+| `expire_at` | Unix timestamp, **defaults to 40 years** |
+| Per-transaction ceiling | ₹15,000 — the same line RBI draws for AFA |
+
+**A UPI Autopay token does not expire in ~3 days.** That is card test-mode
+behaviour, and building a demo around it on this rail would mean waiting for an
+expiry the sandbox never delivers.
+
+So a mandate dies because *the engine says so*, never because Razorpay timed it
+out — `status` (revoked / paused) and `expires_at` are engine state, checked
+before any policy evaluation. This is the right shape regardless of rail: the
+boundary is ours to enforce, and revocation must not depend on a sandbox that
+returns success for cancellations it never performed.
+
 ## Honest seams
 
 Stated here because they will be stated in the demo video too:
