@@ -91,9 +91,12 @@ NVIDIA's own stack, the least likely thing to be cold or deprioritised on a
 free tier. `deepseek-ai/deepseek-v4-pro` and `z-ai/glm-5.2` are the alternates
 if the buyer agent needs stronger tool-calling.
 
-Deliberately **not** a reasoning model. A four-field extraction does not need a
-thinking trace, and during a live demo that trace is dead air. (`_json_object`
-strips one anyway if a model emits it — cheap insurance, not a plan.)
+Nemotron 3 Super is a **hybrid** reasoner and thinks by default, so thinking is
+turned off explicitly via `chat_template_kwargs`. Measured on the four-field
+extraction: **8.3s with thinking, 0.8s without, identical output.** Neither job
+here benefits from a reasoning trace, and a live demo feels every second.
+(`_json_object` strips one anyway if some other model emits it — cheap
+insurance, not a plan.)
 
 Retries are the SDK's: it already backs off on 429 and 5xx, so the client just
 raises `max_retries` above the default rather than owning a retry loop.
@@ -221,6 +224,14 @@ uv run python -m bounded_mandate.compiler "groceries from Instamart every 4 days
 With no key set that command still works — it prints the same card marked
 `[compiled by fallback]`.
 
+There is also a live smoke suite, skipped unless a key is present, because the
+unit tests stub the model and therefore prove the wiring while proving nothing
+about the model:
+
+```bash
+NVIDIA_API_KEY=... uv run pytest tests/test_live.py -v
+```
+
 ## Status
 
 Day 3 of 14. **Phase 1 (engine core) — built.** Layer 0 provenance, Layer 1
@@ -228,10 +239,12 @@ hard policy, Layer 2 one-directional hook, four verdicts, idempotency, the
 hash-chained ledger, the policy compiler with its offline fallback, the
 model-backed Layer 2, and the mock merchant. 56 tests, no network.
 
-**Not yet verified:** no call has been made against a live NIM endpoint. The
-schema, the guided-decoding wiring, the refusal to invent a bound and every
-fallback path are unit-tested against a stub; what remains unproven is the
-model's own extraction accuracy, notably rupees-to-paise.
+**Verified live against NIM.** The compiler extracts ₹2,000 as `200000` paise,
+and refuses to invent a bound from *"whenever we run low"* or *"buy whatever you
+think I need"*. Layer 2 stays quiet on an ordinary weekly basket and flags a
+mislabelled gift card, a 40x price outlier, a quantity slip, and an item name
+carrying a prompt injection — which it reports as an injection rather than
+obeying. Five of those are pinned in `tests/test_live.py`.
 
 Next: Razorpay test-mode settlement (needs no model, so it is not blocked),
 then the buyer agent over a mock merchant.

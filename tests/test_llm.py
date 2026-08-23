@@ -28,7 +28,15 @@ def test_output_is_constrained_by_guided_json():
     client = stub('{"ok": true}')
     complete_json("sys", "user", SCHEMA, client=client)
 
-    assert client.calls[0]["extra_body"] == {"guided_json": SCHEMA}
+    assert client.calls[0]["extra_body"]["guided_json"] == SCHEMA
+
+
+def test_thinking_is_off():
+    """Nemotron 3 Super thinks by default: 8s vs 0.8s on a four-field extraction."""
+    client = stub('{"ok": true}')
+    complete_json("sys", "user", SCHEMA, client=client)
+
+    assert client.calls[0]["extra_body"]["chat_template_kwargs"] == {"enable_thinking": False}
 
 
 def test_sampling_is_pinned_for_the_recorded_run():

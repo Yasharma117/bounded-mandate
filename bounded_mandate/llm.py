@@ -67,6 +67,13 @@ def complete_json(
         model=model or MODEL,
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         temperature=0,  # the recorded demo has to run the same way twice
-        extra_body={"guided_json": schema},
+        extra_body={
+            "guided_json": schema,
+            # Nemotron 3 Super is a hybrid reasoner and thinks by default, which
+            # cost 8s on a four-field extraction. Neither job here benefits from
+            # a reasoning trace, and a live demo feels every second of it.
+            # Harmlessly ignored by providers that do not take the kwarg.
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
     )
     return _json_object(completion.choices[0].message.content)
