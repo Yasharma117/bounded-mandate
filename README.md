@@ -191,13 +191,31 @@ scenario is deterministic — the agent builds a cart with a ₹15,000 item in i
 reports the ₹1,850 grocery subtotal (a *true* number, for the groceries alone),
 and the engine's independent fetch catches it every single run.
 
-**On a real provider (e.g. Swiggy MCP):** it drops in behind the same
-interface, and only the agent-facing half is guaranteed to map cleanly. The
-open question for any real integration is whether it exposes an independent
-canonical read of a cart by id. If a provider can only *build* carts and *place*
-orders — with no way to re-read one — then Layer 0 has nothing to verify
-against, and provenance degrades to trusting the agent. Confirm that read
-exists before treating any provider as a drop-in.
+**On a real provider.** The question to ask of any of them is not whether the
+agent can shop — it is whether the *engine* can independently read back what
+the agent built. Without that, Layer 0 has nothing to verify against and
+provenance degrades to trusting the agent.
+
+Swiggy's Instamart MCP server passes, with two caveats worth writing down.
+It exposes `get_cart` — "the authenticated session's current cart with all
+items and bill breakdown" — so the independent read exists. But `get_cart`
+**takes no arguments**: the read is scoped to the MCP session, not to a cart id.
+
+1. **The engine needs its own authenticated session.** Session-scoped reads
+   only mean something if the engine holds its own OAuth credentials. An engine
+   that asks the *agent* to call `get_cart` and relay the answer has not
+   verified anything — it has trusted the agent with an extra step, and Layer 0
+   becomes decoration while every test still passes.
+2. **The snapshot is not pinned.** One mutable current cart per session, and
+   `update_cart` replaces it wholesale, so the cart can change between the
+   agent's proposal and the engine's fetch. `MockMerchant` cannot exhibit this
+   — its carts are immutable and id-addressed — which makes reserve-then-commit
+   a real requirement on the live integration rather than the optional item it
+   is here.
+
+A Swiggy adapter therefore implements `fetch_cart(cart_id)` by ignoring the id
+and calling `get_cart()`, the id degenerating to a session handle. That shape
+difference is precisely what the adapter exists to absorb.
 
 ## The rail: UPI Autopay
 
