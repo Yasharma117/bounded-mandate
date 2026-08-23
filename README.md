@@ -233,11 +233,34 @@ build-time environment variable, so there is no frontend env prefix to leak.
 
 | Fact | Result |
 |---|---|
-| UPI Autopay recurring enabled on the test account | **yes** — no support ticket needed |
-| `frequency: "as_presented"` | accepted |
+| Orders API with a mandate token object | works — real orders created |
+| `frequency: "as_presented"` | accepted, on both `upi` and `card` |
 | `token.type: "single_block_multiple_debit"` | accepted |
 | `max_amount` ceiling for this MCC | exactly ₹1,00,000 (`10000000` paise) |
 | Token object actually validated | yes — a bad `frequency` and an over-ceiling `max_amount` are both rejected server-side |
+| Checkout modal | loads, renders the correct mandate terms, accepts card entry |
+
+### What the account does not yet permit
+
+`GET /v1/preferences` is the authority here, and it reports:
+
+```
+card: True   upi: False   emandate: None   nach: True
+recurring: None          debit_card_recurring: None
+```
+
+**No method on this account supports recurring**, so Checkout answers any
+mandate order with *"No appropriate payment method found"* regardless of rail —
+switching `RAZORPAY_MANDATE_METHOD` to `card` does not help. Separately, a
+one-time card payment fails at submission with *"The api key provided by you
+has expired"*, even though the same key creates orders through the server API
+seconds later.
+
+Order-creation success is **not** evidence that a method is available. The
+`/v1/preferences` response is.
+
+Unblocking needs three things on the Razorpay account, none of them code:
+account activation, regenerated keys, and recurring / UPI Autopay enabled.
 
 ### Running it
 

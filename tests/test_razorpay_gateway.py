@@ -84,9 +84,20 @@ def test_the_mandate_order_carries_the_token_and_charges_one_rupee():
 
     assert order.order_id == "order_9"
     assert sent["amount"] == AUTH_AMOUNT_PAISE  # ₹1 authorisation, not the cap
-    assert sent["method"] == "upi"
+    assert sent["method"] == "upi"  # the default rail
     assert sent["token"]["max_amount"] == 200_000
     assert sent["token"]["frequency"] == "as_presented"  # variable amount per debit
+
+
+def test_the_rail_is_config_not_a_rewrite():
+    """UPI needs enabling on the merchant account; card e-mandates also do
+    `as_presented`, so switching rails must not touch the engine."""
+    sent = {}
+    gw = gateway(order=SimpleNamespace(create=lambda d: sent.update(d) or {"id": "order_9"}))
+    gw.create_mandate_order("cust_1", max_amount_paise=200_000, method="card")
+
+    assert sent["method"] == "card"
+    assert sent["token"]["frequency"] == "as_presented"
 
 
 def test_the_key_secret_is_not_on_the_object_the_page_receives():

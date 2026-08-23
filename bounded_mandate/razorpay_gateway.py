@@ -35,6 +35,14 @@ MAX_MANDATE_AMOUNT_PAISE = 10_000_000
 
 DEFAULT_MANDATE_YEARS = 5
 
+# Which rail the mandate registers on. UPI Autopay is the design choice —
+# `as_presented` is native to it and it is the better India story — but UPI has
+# to be enabled as a payment method on the merchant account, and Checkout will
+# report "no appropriate payment method" if it is not. Card e-mandates support
+# `as_presented` too, so this stays config rather than a rewrite.
+# Check with: GET /v1/preferences?key_id=...  -> methods.upi
+MANDATE_METHOD = os.environ.get("RAZORPAY_MANDATE_METHOD", "upi")
+
 
 class GatewayError(Exception):
     """Razorpay refused, or could not be reached."""
@@ -104,6 +112,7 @@ class RazorpayGateway:
         max_amount_paise: int,
         frequency: str = "as_presented",
         expire_at: int | None = None,
+        method: str | None = None,
     ) -> MandateOrder:
         """The ₹1 authorisation order that Standard Checkout registers against.
 
@@ -123,7 +132,7 @@ class RazorpayGateway:
                     "amount": AUTH_AMOUNT_PAISE,
                     "currency": "INR",
                     "receipt": f"mandate_{customer_id}",
-                    "method": "upi",
+                    "method": method or MANDATE_METHOD,
                     "customer_id": customer_id,
                     "token": {
                         "max_amount": max_amount_paise,
