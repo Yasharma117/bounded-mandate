@@ -198,6 +198,57 @@ Merchant, category and delivery are separate policy dimensions on purpose.
 constraints — an agent that cannot beat the cap can still ship ₹1,900 of
 perfectly ordinary groceries to a stranger's address.
 
+## Settlement: two legs, not one
+
+Razorpay is reached only from `razorpay_gateway.py`, the single module holding
+the key secret. The agent cannot reach it, and neither can anything the agent
+influences.
+
+The two legs are different shapes, and conflating them would collapse the whole
+thesis into a confirm dialog:
+
+| | Registration | Charging |
+|---|---|---|
+| Who is present | the user | nobody |
+| How often | once | every order |
+| Mechanism | Standard Checkout (`checkout.js`) | server-side token debit |
+| Amount | ₹1 authorisation | the actual basket |
+| RBI | one-time AFA | in-limit debit, no AFA |
+
+**Registration** is the only part exposed over HTTP, because it is the only part
+a human participates in. `POST /api/mandate/order` creates the ₹1 UPI Autopay
+authorisation order carrying the token object; the page opens Razorpay's modal;
+`POST /api/mandate/verify` checks the HMAC-SHA256 signature over
+`order_id|payment_id` before anything is considered registered. A forged
+callback registers nothing.
+
+**Charging** has no HTTP route at all, and a test asserts that none exists. The
+engine debits an authorised token with nobody watching — that *is* the product.
+
+The key secret never leaves the server process. The page receives `key_id`,
+which is public by design, from the order response rather than from a
+build-time environment variable, so there is no frontend env prefix to leak.
+
+### Verified against the live test API
+
+| Fact | Result |
+|---|---|
+| UPI Autopay recurring enabled on the test account | **yes** — no support ticket needed |
+| `frequency: "as_presented"` | accepted |
+| `token.type: "single_block_multiple_debit"` | accepted |
+| `max_amount` ceiling for this MCC | exactly ₹1,00,000 (`10000000` paise) |
+| Token object actually validated | yes — a bad `frequency` and an over-ceiling `max_amount` are both rejected server-side |
+
+### Running it
+
+```bash
+set -a; . ./.env; set +a
+uv run uvicorn bounded_mandate.web:app --reload
+```
+
+Then open `http://127.0.0.1:8000`, edit the rule, press **Read it back** to see
+it compiled, and **Confirm and register** to open Razorpay's modal in test mode.
+
 ## Audit ledger
 
 Append-only JSONL. Every entry carries the SHA-256 of the entry before it, so
@@ -237,7 +288,8 @@ NVIDIA_API_KEY=... uv run pytest tests/test_live.py -v
 Day 3 of 14. **Phase 1 (engine core) — built.** Layer 0 provenance, Layer 1
 hard policy, Layer 2 one-directional hook, four verdicts, idempotency, the
 hash-chained ledger, the policy compiler with its offline fallback, the
-model-backed Layer 2, and the mock merchant. 56 tests, no network.
+model-backed Layer 2, the mock merchant, and the Razorpay registration leg
+(order + Standard Checkout + signature verification). 84 tests, no network.
 
 **Verified live against NIM.** The compiler extracts ₹2,000 as `200000` paise,
 and refuses to invent a bound from *"whenever we run low"* or *"buy whatever you
@@ -246,8 +298,13 @@ mislabelled gift card, a 40x price outlier, a quantity slip, and an item name
 carrying a prompt injection — which it reports as an injection rather than
 obeying. Five of those are pinned in `tests/test_live.py`.
 
-Next: Razorpay test-mode settlement (needs no model, so it is not blocked),
-then the buyer agent over a mock merchant.
+**Not yet exercised:** the subsequent-payment charge. `charge()` is written but
+cannot run until a mandate is actually registered, which needs a human to
+approve the UPI Autopay request in a PSP app. Everything up to that point runs
+against live Razorpay.
+
+Next: the buyer agent over the mock merchant, and reconciliation of a real
+charge once a mandate is registered.
 
 ## Commerce: an adapter, and a mock behind it
 

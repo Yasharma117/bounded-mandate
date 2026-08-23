@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bounded Mandate · Register</title>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<style>
+  :root{
+    --bg:#02042B; --surface:#0B1039; --line:#1E2559; --ink:#EEF1FF;
+    --muted:#8E96C8; --accent:#3395FF; --bad:#FF6B6B; --good:#3ECF8E;
+    --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--font);
+       min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+  main{width:100%;max-width:460px}
+  h1{font-size:20px;font-weight:600;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:14px;margin:6px 0 22px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px}
+  label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px}
+  textarea{width:100%;background:#070A2E;border:1px solid var(--line);border-radius:10px;
+           color:var(--ink);font-family:inherit;font-size:15px;padding:12px;resize:vertical;min-height:76px}
+  textarea:focus{outline:none;border-color:var(--accent)}
+  button{width:100%;border:none;border-radius:10px;font-family:inherit;font-size:15px;
+         font-weight:600;padding:13px;cursor:pointer;transition:opacity .15s}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .primary{background:var(--accent);color:#031024}
+  .ghost{background:transparent;border:1px solid var(--line);color:var(--ink);font-weight:500}
+  .row{display:flex;justify-content:space-between;align-items:baseline;
+       padding:11px 0;border-bottom:1px solid var(--line);font-size:14px}
+  .row:last-child{border-bottom:none}
+  .row .k{color:var(--muted)}
+  .row .v{font-weight:600}
+  .hint{font-size:12.5px;color:var(--muted);line-height:1.55;margin-top:12px}
+  .msg{border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.5;margin-bottom:14px;display:none}
+  .msg.show{display:block}
+  .msg.err{background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--bad)}
+  .msg.ok{background:rgba(62,207,142,.1);border:1px solid rgba(62,207,142,.3);color:var(--good)}
+  .msg.info{background:rgba(51,149,255,.1);border:1px solid rgba(51,149,255,.3);color:var(--accent)}
+  .tag{font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+  .stack > * + *{margin-top:10px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Set a standing rule</h1>
+  <p class="sub">Say it once. Orders inside these lines run on their own.</p>
+
+  <div id="msg" class="msg"></div>
+
+  <div class="card">
+    <label for="rule">Your rule</label>
+    <textarea id="rule">Order my usual groceries from Instamart every 4 days, keep each under ₹2,000</textarea>
+    <div style="height:12px"></div>
+    <button id="compile" class="ghost">Read it back</button>
+  </div>
+
+  <div class="card" id="bounds" hidden>
+    <div class="tag" id="source"></div>
+    <div style="height:10px"></div>
+    <div id="rows"></div>
+    <p class="hint">Confirming registers this once with your bank — a ₹1 UPI Autopay
+       authorisation. Orders inside these lines then run without asking. Pause or change anytime.</p>
+    <div style="height:14px"></div>
+    <button id="register" class="primary">Confirm and register</button>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const msg = (text, kind) => {
+  const el = $("msg");
+  el.textContent = text;
+  el.className = "msg show " + kind;
+};
+const clearMsg = () => { $("msg").className = "msg"; };
+
+let bounds = null;
+
+async function post(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `${res.status} ${res.statusText}`);
+  return data;
+}
+
+const rupees = (paise) => "₹" + (paise / 100).toLocaleString("en-IN");
+
+function renderBounds(data) {
+  bounds = data.bounds;
+  $("source").textContent = data.source === "fallback"
+    ? "compiled offline — provider unreachable"
+    : "compiled from your words";
+  $("rows").innerHTML = [
+    ["Spend limit", bounds.per_txn_max_paise ? rupees(bounds.per_txn_max_paise) + " per order" : "—"],
+    ["Cadence", bounds.cadence_days ? `every ${bounds.cadence_days} days` : "—"],
+    ["Merchant", bounds.merchants.join(", ") || "—"],
+    ["Scope", bounds.categories.join(", ") || "—"],
+  ].map(([k, v]) => `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
+
+  $("bounds").hidden = false;
+  $("register").disabled = !data.registrable;
+  if (!data.registrable) {
+    msg(`Still needs an answer: ${data.missing.join(", ")}. Nothing is assumed — say it and try again.`, "info");
+  }
+}
+
+$("compile").onclick = async () => {
+  clearMsg();
+  $("compile").disabled = true;
+  $("compile").textContent = "Reading…";
+  try {
+    renderBounds(await post("/api/mandate/compile", { text: $("rule").value }));
+  } catch (err) {
+    msg(err.message, "err");
+  } finally {
+    $("compile").disabled = false;
+    $("compile").textContent = "Read it back";
+  }
+};
+
+$("register").onclick = async () => {
+  clearMsg();
+  $("register").disabled = true;
+  try {
+    const order = await post("/api/mandate/order", {
+      max_amount_paise: bounds.per_txn_max_paise,
+    });
+
+    const rzp = new Razorpay({
+      key: order.key_id,
+      order_id: order.order_id,
+      customer_id: order.customer_id,
+      amount: order.amount,
+      currency: order.currency,
+      recurring: "1",
+      name: "Bounded Mandate",
+      description: `Authorise up to ${rupees(bounds.per_txn_max_paise)} per order`,
+      handler: async (response) => {
+        try {
+          const out = await post("/api/mandate/verify", response);
+          msg(`Registered. Orders inside your rule now run on their own.` +
+              (out.token_id ? ` Mandate token ${out.token_id}.` : ""), "ok");
+          $("register").textContent = "Registered";
+        } catch (err) {
+          msg("Payment could not be verified — nothing was registered. " + err.message, "err");
+          $("register").disabled = false;
+        }
+      },
+      modal: {
+        ondismiss: () => {
+          msg("Cancelled — nothing was registered.", "info");
+          $("register").disabled = false;
+        },
+      },
+    });
+
+    rzp.on("payment.failed", (e) => {
+      const d = (e && e.error) || {};
+      msg(`Authorisation failed: ${d.description || "unknown error"}` +
+          (d.reason ? ` (${d.reason})` : "") + ". Nothing was registered.", "err");
+      $("register").disabled = false;
+    });
+
+    rzp.open();
+  } catch (err) {
+    msg(err.message, "err");
+    $("register").disabled = false;
+  }
+};
+</script>
+</body>
+</html>
