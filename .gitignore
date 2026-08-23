@@ -7,3 +7,7 @@ __pycache__/
 .env
 .DS_Store
 ledger.jsonl
+
+# vendored agent skills — reproducible from skills-lock.json
+.agents/
+.claude/skills/
