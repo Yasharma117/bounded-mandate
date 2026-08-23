@@ -240,6 +240,37 @@ build-time environment variable, so there is no frontend env prefix to leak.
 | Token object actually validated | yes — a bad `frequency` and an over-ceiling `max_amount` are both rejected server-side |
 | Checkout modal | loads, renders the correct mandate terms, accepts card entry |
 
+### A completed test payment
+
+Razorpay gates account activation on one real test transaction. Done, driven
+through the actual Standard Checkout modal:
+
+```
+payment_id  pay_TTMX1mGSIy1mO4   status captured   ₹1   method card
+order_id    order_TTMWRVfH9sgCuZ
+```
+
+The callback signature was then put through this codebase's own verifier:
+
+| Input | Result |
+|---|---|
+| the genuine signature Razorpay returned | `200 {"verified": true}` |
+| the same signature, one byte changed | `400 signature verification failed` |
+
+That is the verification path proven against a real Razorpay signature rather
+than a synthetic one.
+
+**What actually blocked this for several attempts:** the first key pair was a
+rotated one. Razorpay's server API kept accepting it — `POST /v1/orders`
+returned real orders — while `POST /v1/standard_checkout/payments/create/ajax`
+answered `401 "The api key provided by you has expired"`. The split is that the
+server API authenticates with `key_id` **and secret**, whereas checkout
+authenticates with `key_id` alone, and only the latter is checked against key
+rotation. A fresh key pair fixed it immediately.
+
+`activated: false` on the account was **not** the cause — this payment
+succeeded with the account still in that state.
+
 ### What the account does not yet permit
 
 `GET /v1/preferences` is the authority here, and it reports:
