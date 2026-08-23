@@ -3,7 +3,9 @@ name = "bounded-mandate"
 version = "0.1.0"
 description = "Authorization layer between an autonomous buying agent and money."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "anthropic>=1.0.0",
+]
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]

@@ -43,6 +43,33 @@ coerced to `ESCALATE`. There is no return value that approves anything. A fully
 compromised Layer 2 cannot widen the agent's authority; the worst it achieves is
 tripping a flag, which fails safe.
 
+## Policy compiler
+
+Plain language in, an enforceable contract out.
+
+```
+"Order my usual groceries from Instamart every 4 days, keep each under ₹2,000"
+
+  Spend limit   ₹2,000 per order
+  Cadence       every 4 days
+  Merchant      instamart
+  Scope         groceries
+```
+
+The compiler runs **outside the trust boundary**. Its output is reflected back
+on the setup card and the user confirms it before it becomes authority, so a
+mistake here is caught by a human at setup rather than by the engine at
+runtime — which is why there is no retry loop and no self-critique. The
+reflect-back *is* the validation.
+
+The one rule that matters: **it may not invent a bound.** An unstated cap comes
+back `None`, the rule does not compile, and the surface asks. A guessed ₹2,000
+would be authority the user never granted. Delivery addresses are deliberately
+not extractable — they come from the account, never from a sentence.
+
+`"every 4 days"` compiles to `max_charges_per_window=1, window_days=4`. Cadence
+and frequency ceiling are the same bound seen from two sides.
+
 ## Decision model
 
 Every proposal returns exactly one verdict plus machine-readable reason codes —
@@ -110,17 +137,29 @@ uv sync
 uv run pytest -q
 ```
 
-No external services, no API keys, no network. The engine core is
-provider-independent by construction.
+The test suite makes no network calls and needs no API key — the model client is
+injected, and stubbed in tests. To compile a rule against the live model:
+
+```bash
+uv run python -m bounded_mandate.compiler "groceries from Instamart every 4 days, under ₹2,000"
+```
+
+That needs Anthropic credentials (`ANTHROPIC_API_KEY` or an `ant auth login`
+profile) and API credit.
 
 ## Status
 
-Day 3 of 14. **Phase 1 (engine core) — in progress.** Layer 0 provenance,
-Layer 1 hard policy, Layer 2 one-directional hook, four verdicts, idempotency
-and the hash-chained ledger are built and tested. Nothing is wired to a rail yet.
+Day 3 of 14. **Phase 1 (engine core) — built.** Layer 0 provenance, Layer 1
+hard policy, Layer 2 one-directional hook, four verdicts, idempotency, the
+hash-chained ledger and the policy compiler. 28 tests, no network.
 
-Next: the policy compiler (plain language → contract), then Razorpay test-mode
-settlement, then the buyer agent over a mock merchant.
+**Not yet verified:** the compiler has never been run against the live model —
+the account is out of API credit. Its schema and its refusal to invent a bound
+are unit-tested against a stub; what remains unproven is the model's own
+extraction accuracy, notably rupees-to-paise.
+
+Next: Razorpay test-mode settlement (needs no model, so it is not blocked),
+then the buyer agent over a mock merchant.
 
 ## Honest seams
 
