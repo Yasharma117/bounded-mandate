@@ -70,6 +70,51 @@ not extractable — they come from the account, never from a sentence.
 `"every 4 days"` compiles to `max_charges_per_window=1, window_days=4`. Cadence
 and frequency ceiling are the same bound seen from two sides.
 
+## The model
+
+Provider is **NVIDIA NIM** behind its OpenAI-compatible endpoint. The whole
+binding is two environment variables, so swapping model — or swapping provider
+to anything that speaks the OpenAI shape — is config, not code:
+
+```bash
+export NVIDIA_API_KEY=nvapi-...
+export BM_LLM_MODEL=nvidia/nemotron-3-super-120b-a12b   # the default
+export BM_LLM_BASE_URL=https://integrate.api.nvidia.com/v1
+```
+
+**Why that default.** The task is easy; the risk is availability, not
+capability. Output is constrained with NIM's `guided_json`, which enforces the
+schema at the decoding level (xgrammar), so "clean JSON" stops being a
+model-selection criterion — which leaves latency and rate-limit exposure.
+Nemotron 3 Super is MoE with ~12B active, and it is NVIDIA's own model on
+NVIDIA's own stack, the least likely thing to be cold or deprioritised on a
+free tier. `deepseek-ai/deepseek-v4-pro` and `z-ai/glm-5.2` are the alternates
+if the buyer agent needs stronger tool-calling.
+
+Deliberately **not** a reasoning model. A four-field extraction does not need a
+thinking trace, and during a live demo that trace is dead air. (`_json_object`
+strips one anyway if a model emits it — cheap insurance, not a plan.)
+
+Retries are the SDK's: it already backs off on 429 and 5xx, so the client just
+raises `max_retries` above the default rather than owning a retry loop.
+
+### The offline fallback
+
+The recorded demo is a live walkthrough, so a provider hiccup must not be able
+to break it. If NIM is unreachable, rate-limited, or answers with something
+unusable, the compiler falls back to a deterministic parser that reads the
+shapes a spoken rule actually takes — ₹ amounts, `every N days`, `weekly`,
+known merchants and categories.
+
+Two properties keep this honest:
+
+- **It never guesses either.** Anything the parser cannot read comes back as a
+  missing bound, exactly as it would from the model. The no-invented-authority
+  rule binds both paths.
+- **It is never hidden.** `Compiled.source` is `"model"` or `"fallback"`, and
+  the reflect-back card prints `[compiled by fallback]`. A silent fallback
+  during a demo would be a lie told to the room.
+
 ## Decision model
 
 Every proposal returns exactly one verdict plus machine-readable reason codes —
@@ -138,26 +183,28 @@ uv run pytest -q
 ```
 
 The test suite makes no network calls and needs no API key — the model client is
-injected, and stubbed in tests. To compile a rule against the live model:
+injected and stubbed, and the fallback path is deterministic by construction.
+To compile a rule against the live provider:
 
 ```bash
+export NVIDIA_API_KEY=nvapi-...
 uv run python -m bounded_mandate.compiler "groceries from Instamart every 4 days, under ₹2,000"
 ```
 
-That needs Anthropic credentials (`ANTHROPIC_API_KEY` or an `ant auth login`
-profile) and API credit.
+With no key set that command still works — it prints the same card marked
+`[compiled by fallback]`.
 
 ## Status
 
 Day 3 of 14. **Phase 1 (engine core) — built.** Layer 0 provenance, Layer 1
 hard policy, Layer 2 one-directional hook, four verdicts, idempotency, the
-hash-chained ledger, the policy compiler and the mock merchant. 37 tests,
-no network.
+hash-chained ledger, the policy compiler with its offline fallback, and the
+mock merchant. 48 tests, no network.
 
-**Not yet verified:** the compiler has never been run against the live model —
-the account is out of API credit. Its schema and its refusal to invent a bound
-are unit-tested against a stub; what remains unproven is the model's own
-extraction accuracy, notably rupees-to-paise.
+**Not yet verified:** no call has been made against a live NIM endpoint. The
+schema, the guided-decoding wiring, the refusal to invent a bound and every
+fallback path are unit-tested against a stub; what remains unproven is the
+model's own extraction accuracy, notably rupees-to-paise.
 
 Next: Razorpay test-mode settlement (needs no model, so it is not blocked),
 then the buyer agent over a mock merchant.

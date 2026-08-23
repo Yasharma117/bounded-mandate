@@ -7,24 +7,25 @@
 This runs **outside the trust boundary**. Its output is reflected back on the
 setup card and the user confirms it before it becomes authority, so a mistake
 here is caught by a human at setup rather than by the engine at runtime. That
-is why there is no retry loop, no self-critique and no second opinion: the
-reflect-back card is the validation.
+is why there is no retry loop and no self-critique: the reflect-back card is
+the validation.
 
 The one rule that does matter: **it may not invent a bound.** An unstated cap
-comes back `None` and the surface asks. A guessed ₹2,000 would be authority the
-user never granted.
+comes back `None`, the rule refuses to compile, and the surface asks. A guessed
+₹2,000 would be authority the user never granted — and that rule binds the
+offline fallback exactly as it binds the model.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from .engine import MandateStatus, Policy
-
-MODEL = "claude-opus-5"
+from .llm import complete_json
 
 SYSTEM = """You compile a spoken purchasing rule into a machine-readable mandate.
 
@@ -77,6 +78,47 @@ class MandateDraft(BaseModel):
         )
 
 
+# --- the offline fallback ----------------------------------------------------
+#
+# The recorded demo is a live walkthrough, so a provider hiccup must not be able
+# to break it. This handles the shapes a spoken rule actually takes; anything it
+# cannot read comes back as a missing bound, which is the correct answer anyway.
+# It never guesses — same rule as the model.
+
+_AMOUNT = re.compile(r"(?:₹|\brs\.?|\binr)\s*([\d,]+)|\bunder\s+([\d,]+)", re.I)
+_EVERY_N_DAYS = re.compile(r"\bevery\s+(\d+)\s*days?\b", re.I)
+_WORD_CADENCE = {"daily": 1, "every day": 1, "weekly": 7, "every week": 7, "fortnightly": 14}
+_MERCHANTS = ("instamart", "blinkit", "zepto", "bigbasket", "dmart", "swiggy")
+_CATEGORIES = {
+    "groceries": "groceries",
+    "grocery": "groceries",
+    "household": "household",
+    "essentials": "essentials",
+    "medicines": "medicines",
+    "snacks": "snacks",
+    "beverages": "beverages",
+}
+
+
+def _offline_draft(utterance: str) -> MandateDraft:
+    said = utterance.casefold()
+
+    amount = _AMOUNT.search(utterance)
+    rupees = next((g for g in amount.groups() if g), None) if amount else None
+
+    cadence = _EVERY_N_DAYS.search(said)
+    days = int(cadence.group(1)) if cadence else None
+    if days is None:
+        days = next((n for word, n in _WORD_CADENCE.items() if word in said), None)
+
+    return MandateDraft(
+        per_txn_max_paise=int(rupees.replace(",", "")) * 100 if rupees else None,
+        merchants=[m for m in _MERCHANTS if m in said],
+        categories=sorted({v for k, v in _CATEGORIES.items() if k in said}),
+        cadence_days=days,
+    )
+
+
 @dataclass(frozen=True)
 class Compiled:
     """What the setup card renders: the draft, and what it still needs to ask."""
@@ -84,6 +126,7 @@ class Compiled:
     utterance: str
     draft: MandateDraft
     policy: Policy | None
+    source: str  # "model" or "fallback" — never hidden from the operator
 
     @property
     def missing(self) -> tuple[str, ...]:
@@ -96,25 +139,30 @@ def compile_mandate(
     mandate_id: str,
     delivery_addresses: frozenset[str],
     client: Any | None = None,
+    model: str | None = None,
 ) -> Compiled:
-    """Compile one plain-language rule. Pass `client` to stub the model in tests."""
-    if client is None:
-        import anthropic
+    """Compile one plain-language rule.
 
-        client = anthropic.Anthropic()
+    Falls back to the offline parser if the provider is unreachable or answers
+    with something unusable, and says so in `source`. Pass `client` to stub the
+    model in tests.
+    """
+    try:
+        payload = complete_json(
+            SYSTEM,
+            utterance,
+            MandateDraft.model_json_schema(),
+            client=client,
+            model=model,
+        )
+        draft, source = MandateDraft.model_validate(payload), "model"
+    except Exception:
+        draft, source = _offline_draft(utterance), "fallback"
 
-    response = client.messages.parse(
-        model=MODEL,
-        max_tokens=16_000,
-        system=SYSTEM,
-        messages=[{"role": "user", "content": utterance}],
-        output_format=MandateDraft,
-    )
-    draft = response.parsed_output
-    return Compiled(utterance, draft, draft.to_policy(mandate_id, delivery_addresses))
+    return Compiled(utterance, draft, draft.to_policy(mandate_id, delivery_addresses), source)
 
 
-def _render(compiled: Compiled) -> str:
+def render(compiled: Compiled) -> str:
     """The reflect-back card, as text. Scene 1 of the demo prints this."""
     d = compiled.draft
     rupees = "—" if d.per_txn_max_paise is None else f"₹{d.per_txn_max_paise / 100:,.0f}"
@@ -125,19 +173,23 @@ def _render(compiled: Compiled) -> str:
         f"  Cadence       {'—' if d.cadence_days is None else f'every {d.cadence_days} days'}",
         f"  Merchant      {', '.join(d.merchants) or '—'}",
         f"  Scope         {', '.join(d.categories) or '—'}",
+        "",
     ]
     if compiled.missing:
-        lines += ["", f"  Needs an answer before this can register: {', '.join(compiled.missing)}"]
+        lines.append(f"  Needs an answer before this can register: {', '.join(compiled.missing)}")
     else:
-        lines += ["", "  Confirm and register."]
+        lines.append("  Confirm and register.")
+    lines.append(f"  [compiled by {compiled.source}]")
     return "\n".join(lines)
 
 
-if __name__ == "__main__":  # pragma: no cover - eyeball the real model
+if __name__ == "__main__":  # pragma: no cover - eyeball a real provider call
     import sys
+
+    from .llm import BASE_URL, MODEL
 
     said = " ".join(sys.argv[1:]) or (
         "Order my usual groceries from Instamart every 4 days, keep each under ₹2,000"
     )
-    # Credentials resolve from ANTHROPIC_API_KEY or an `ant auth login` profile.
-    print(_render(compile_mandate(said, mandate_id="mdt_demo", delivery_addresses=frozenset())))
+    print(f"  {MODEL} @ {BASE_URL}\n")
+    print(render(compile_mandate(said, mandate_id="mdt_demo", delivery_addresses=frozenset())))
