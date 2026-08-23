@@ -14,7 +14,7 @@ from datetime import timedelta
 import pytest
 
 from bounded_mandate import Cart, CartItem, MandateStatus, Proposal, Verdict, decide
-from tests.conftest import HOME, NOW, FakeMerchant, groceries
+from tests.conftest import HOME, NOW, groceries, merchant_holding
 
 
 def run(proposal, policies, adapter, ledger, **kw):
@@ -26,7 +26,7 @@ def run(proposal, policies, adapter, ledger, **kw):
 
 def test_in_policy_cart_is_allowed_silently(policies, ledger):
     cart = groceries()
-    decision = run(Proposal("mdt_1", "cart_1", 185_000), policies, FakeMerchant(cart), ledger)
+    decision = run(Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(cart), ledger)
 
     assert decision.verdict is Verdict.ALLOW
     assert decision.reason_code == "ok.in_policy"
@@ -34,8 +34,8 @@ def test_in_policy_cart_is_allowed_silently(policies, ledger):
 
 
 def test_every_path_writes_one_ledger_entry(policies, ledger):
-    run(Proposal("mdt_1", "cart_1", 185_000), policies, FakeMerchant(groceries()), ledger)
-    run(Proposal("mdt_1", "nope", 1), policies, FakeMerchant(), ledger)
+    run(Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(groceries()), ledger)
+    run(Proposal("mdt_1", "nope", 1), policies, merchant_holding(), ledger)
 
     assert ledger.verify() == 2
 
@@ -54,7 +54,7 @@ def test_lying_agent_is_caught(policies, ledger):
         ),
         delivery_address=HOME,
     )
-    decision = run(Proposal("mdt_1", "cart_1", 185_000), policies, FakeMerchant(real), ledger)
+    decision = run(Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(real), ledger)
 
     assert decision.verdict is Verdict.DENY
     assert "provenance.total_mismatch" in decision.reason_code
@@ -63,14 +63,16 @@ def test_lying_agent_is_caught(policies, ledger):
 
 
 def test_unknown_cart_is_denied(policies, ledger):
-    decision = run(Proposal("mdt_1", "ghost", 185_000), policies, FakeMerchant(), ledger)
+    decision = run(Proposal("mdt_1", "ghost", 185_000), policies, merchant_holding(), ledger)
     assert decision.verdict is Verdict.DENY
     assert decision.reason_code == "provenance.cart_not_found"
 
 
 def test_policy_is_never_taken_from_the_proposal(ledger):
     """An agent naming a mandate the engine does not hold gets nothing."""
-    decision = run(Proposal("mdt_forged", "cart_1", 185_000), {}, FakeMerchant(groceries()), ledger)
+    decision = run(
+        Proposal("mdt_forged", "cart_1", 185_000), {}, merchant_holding(groceries()), ledger
+    )
     assert decision.verdict is Verdict.DENY
     assert decision.reason_code == "mandate.unknown"
 
@@ -90,7 +92,7 @@ def test_cap_breach_and_off_category_surface_together(policies, ledger):
         ),
         delivery_address=HOME,
     )
-    decision = run(Proposal("mdt_1", "cart_1", 240_000), policies, FakeMerchant(cart), ledger)
+    decision = run(Proposal("mdt_1", "cart_1", 240_000), policies, merchant_holding(cart), ledger)
 
     assert decision.verdict is Verdict.ESCALATE
     assert decision.reason_code == "category.not_allowed+cap.exceeded"
@@ -103,7 +105,7 @@ def test_cap_breach_and_off_category_surface_together(policies, ledger):
 def test_dead_mandate_denies(policy, ledger, status, code):
     policies = {"mdt_1": replace(policy, status=status)}
     decision = run(
-        Proposal("mdt_1", "cart_1", 185_000), policies, FakeMerchant(groceries()), ledger
+        Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(groceries()), ledger
     )
     assert decision.verdict is Verdict.DENY
     assert decision.reason_code == code
@@ -112,14 +114,14 @@ def test_dead_mandate_denies(policy, ledger, status, code):
 def test_expired_mandate_denies(policy, ledger):
     policies = {"mdt_1": replace(policy, expires_at=NOW - timedelta(seconds=1))}
     decision = run(
-        Proposal("mdt_1", "cart_1", 185_000), policies, FakeMerchant(groceries()), ledger
+        Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(groceries()), ledger
     )
     assert decision.reason_code == "mandate.expired"
 
 
 def test_wrong_merchant_escalates(policies, ledger):
     cart = replace(groceries(), merchant="blinkit")
-    decision = run(Proposal("mdt_1", "cart_1", 185_000), policies, FakeMerchant(cart), ledger)
+    decision = run(Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(cart), ledger)
     assert decision.verdict is Verdict.ESCALATE
     assert decision.reason_code == "merchant.not_allowed"
 
@@ -127,14 +129,14 @@ def test_wrong_merchant_escalates(policies, ledger):
 def test_stranger_address_escalates_even_inside_every_other_bound(policies, ledger):
     """₹1,850 of ordinary groceries, correct merchant — shipped somewhere else."""
     cart = replace(groceries(), delivery_address="Someone else's flat")
-    decision = run(Proposal("mdt_1", "cart_1", 185_000), policies, FakeMerchant(cart), ledger)
+    decision = run(Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(cart), ledger)
     assert decision.verdict is Verdict.ESCALATE
     assert decision.reason_code == "delivery.unknown_address"
 
 
 def test_unclassifiable_item_clarifies_rather_than_guessing(policies, ledger):
     cart = replace(groceries(), items=(CartItem("Whey protein 1kg", 185_000, ""),))
-    decision = run(Proposal("mdt_1", "cart_1", 185_000), policies, FakeMerchant(cart), ledger)
+    decision = run(Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(cart), ledger)
     assert decision.verdict is Verdict.CLARIFY
     assert decision.reason_code == "category.unknown"
 
@@ -145,7 +147,7 @@ def test_clarify_never_outranks_a_boundary_breach(policies, ledger):
         groceries(),
         items=(CartItem("Whey protein 1kg", 185_000, ""), CartItem("Coffee", 60_000, "groceries")),
     )
-    decision = run(Proposal("mdt_1", "cart_1", 245_000), policies, FakeMerchant(cart), ledger)
+    decision = run(Proposal("mdt_1", "cart_1", 245_000), policies, merchant_holding(cart), ledger)
     assert decision.verdict is Verdict.ESCALATE
     assert "category.unknown" in decision.reason_code
 
@@ -153,11 +155,13 @@ def test_clarify_never_outranks_a_boundary_breach(policies, ledger):
 def test_frequency_ceiling_escalates(policies, ledger):
     for n in (1, 2):
         cart = groceries(cart_id=f"cart_{n}")
-        prior = run(Proposal("mdt_1", cart.cart_id, 185_000), policies, FakeMerchant(cart), ledger)
+        prior = run(
+            Proposal("mdt_1", cart.cart_id, 185_000), policies, merchant_holding(cart), ledger
+        )
         assert prior.verdict is Verdict.ALLOW
 
     third = groceries(cart_id="cart_3")
-    decision = run(Proposal("mdt_1", "cart_3", 185_000), policies, FakeMerchant(third), ledger)
+    decision = run(Proposal("mdt_1", "cart_3", 185_000), policies, merchant_holding(third), ledger)
     assert decision.verdict is Verdict.ESCALATE
     assert decision.reason_code == "frequency.exceeded"
 
@@ -166,7 +170,7 @@ def test_frequency_ceiling_escalates(policies, ledger):
 
 
 def test_same_cart_twice_in_a_window_authorises_once(policies, ledger):
-    merchant = FakeMerchant(groceries())
+    merchant = merchant_holding(groceries())
     first = run(Proposal("mdt_1", "cart_1", 185_000), policies, merchant, ledger)
     second = run(Proposal("mdt_1", "cart_1", 185_000), policies, merchant, ledger)
 
@@ -186,7 +190,7 @@ def test_semantic_layer_can_raise_suspicion(policies, ledger):
     decision = run(
         Proposal("mdt_1", "cart_1", 185_000),
         policies,
-        FakeMerchant(groceries()),
+        merchant_holding(groceries()),
         ledger,
         semantic_check=suspicious,
     )
@@ -204,7 +208,7 @@ def test_semantic_layer_cannot_approve(policies, ledger):
     decision = run(
         Proposal("mdt_1", "cart_1", 900_000),
         policies,
-        FakeMerchant(cart),
+        merchant_holding(cart),
         ledger,
         semantic_check=compromised,
     )

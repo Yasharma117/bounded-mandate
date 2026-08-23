@@ -13,6 +13,7 @@ from .engine import (
     decide,
 )
 from .ledger import ChainBroken, Ledger
+from .merchant import MockMerchant
 
 __all__ = [
     "Cart",
@@ -21,6 +22,7 @@ __all__ = [
     "CommerceAdapter",
     "Decision",
     "Ledger",
+    "MockMerchant",
     "MandateStatus",
     "Policy",
     "Proposal",

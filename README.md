@@ -151,7 +151,8 @@ profile) and API credit.
 
 Day 3 of 14. **Phase 1 (engine core) — built.** Layer 0 provenance, Layer 1
 hard policy, Layer 2 one-directional hook, four verdicts, idempotency, the
-hash-chained ledger and the policy compiler. 28 tests, no network.
+hash-chained ledger, the policy compiler and the mock merchant. 37 tests,
+no network.
 
 **Not yet verified:** the compiler has never been run against the live model —
 the account is out of API credit. Its schema and its refusal to invent a bound
@@ -160,6 +161,43 @@ extraction accuracy, notably rupees-to-paise.
 
 Next: Razorpay test-mode settlement (needs no model, so it is not blocked),
 then the buyer agent over a mock merchant.
+
+## Commerce: an adapter, and a mock behind it
+
+The commerce integration sits behind one interface, and the engine's half of it
+is a single method:
+
+```python
+class CommerceAdapter(Protocol):
+    def fetch_cart(self, cart_id: str) -> Cart | None: ...
+```
+
+That narrowness is deliberate. A merchant integration has two audiences and
+they must not be confused:
+
+- **Agent-facing** — search, browse, build a cart. Rich, and completely outside
+  the trust boundary. This is where a compromised agent slips a smartwatch into
+  a grocery run.
+- **Engine-facing** — `fetch_cart`, and nothing else. One independent read of
+  what the merchant actually holds.
+
+`MockMerchant` implements both. Its catalog is tuned so the demo's numbers fall
+out of real items rather than being asserted: the twelve staples total exactly
+₹1,850, and adding the earbuds and phone case makes ₹2,400 across 14 items.
+A test pins both, so the escalation screen can never drift from the basket.
+
+The mock is not a downgrade. Because we control the catalog, the lying-agent
+scenario is deterministic — the agent builds a cart with a ₹15,000 item in it,
+reports the ₹1,850 grocery subtotal (a *true* number, for the groceries alone),
+and the engine's independent fetch catches it every single run.
+
+**On a real provider (e.g. Swiggy MCP):** it drops in behind the same
+interface, and only the agent-facing half is guaranteed to map cleanly. The
+open question for any real integration is whether it exposes an independent
+canonical read of a cart by id. If a provider can only *build* carts and *place*
+orders — with no way to re-read one — then Layer 0 has nothing to verify
+against, and provenance degrades to trusting the agent. Confirm that read
+exists before treating any provider as a drop-in.
 
 ## The rail: UPI Autopay
 
