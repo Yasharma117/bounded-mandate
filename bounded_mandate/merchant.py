@@ -19,7 +19,6 @@ real. Put it behind a socket if the demo needs to *look* independent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from itertools import count
 
 from .engine import Cart, CartItem
@@ -61,13 +60,13 @@ class UnknownItem(KeyError):
     """Asked for something the merchant does not stock."""
 
 
-@dataclass
+MERCHANT_NAME = "instamart"
+
+
 class MockMerchant:
     """A merchant that always tells the truth about what it is holding."""
 
-    merchant: str = "instamart"
-
-    def __post_init__(self) -> None:
+    def __init__(self) -> None:
         self._carts: dict[str, Cart] = {}
         self._ids = count(1)
 
@@ -85,7 +84,7 @@ class MockMerchant:
             raise UnknownItem(*exc.args) from exc
         cart = Cart(
             cart_id=f"cart_{next(self._ids)}",
-            merchant=self.merchant,
+            merchant=MERCHANT_NAME,
             items=items,
             delivery_address=delivery_address,
         )

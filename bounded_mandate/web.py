@@ -19,14 +19,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from .compiler import compile_mandate, render
+from .compiler import compile_mandate
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import Ledger
-from .merchant import CATALOG, USUAL_GROCERIES, MockMerchant
+from .merchant import USUAL_GROCERIES, MockMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
 
 app = FastAPI(title="Bounded Mandate", docs_url="/api/docs")
@@ -40,6 +40,29 @@ HOME = "12 Nandidurga Rd, Bengaluru"
 # about what it is rather than pretending to be a database.
 LEDGER = Ledger(os.environ.get("BM_LEDGER", "ledger.jsonl"))
 MERCHANT = MockMerchant()
+# Demo baskets. Temporary scaffolding: the buyer agent will build carts itself,
+# and these go with the buttons that call them.
+SCENARIOS: dict[str, dict] = {
+    "honest": {
+        "label": "The usual basket — ₹1,850",
+        "note": "12 groceries, reported truthfully",
+        "items": list(USUAL_GROCERIES),
+        "claimed_total_paise": 185_000,
+    },
+    "overcap": {
+        "label": "Basket with earbuds and a phone case — ₹2,400",
+        "note": "over cap, and two items off-scope",
+        "items": [*USUAL_GROCERIES, "Bluetooth earbuds", "Phone case"],
+        "claimed_total_paise": 240_000,
+    },
+    "lying": {
+        "label": "Claim ₹1,850, hide a ₹15,000 smartwatch",
+        "note": "the agent lies about its own cart",
+        "items": [*USUAL_GROCERIES, "Smartwatch"],
+        "claimed_total_paise": 185_000,
+    },
+}
+
 POLICIES: dict[str, Policy] = {
     "mdt_demo": Policy(
         mandate_id="mdt_demo",
@@ -92,15 +115,11 @@ def order_page() -> str:
     return (STATIC / "order.html").read_text(encoding="utf-8")
 
 
-@app.get("/api/catalog")
-def catalog() -> dict:
-    return {
-        "usual": list(USUAL_GROCERIES),
-        "items": [
-            {"name": i.name, "paise": i.price_paise, "category": i.category or None}
-            for i in CATALOG.values()
-        ],
-    }
+@app.get("/api/scenarios")
+def scenarios() -> dict:
+    """The baskets the demo buttons propose. Server-owned, so the page holds no
+    copy of the catalog — and this whole endpoint dies when the agent lands."""
+    return SCENARIOS
 
 
 @app.get("/api/ledger")
@@ -126,7 +145,6 @@ def compile_rule(body: Utterance) -> dict:
         "source": compiled.source,
         "missing": list(compiled.missing),
         "registrable": compiled.policy is not None,
-        "card": render(compiled),
         "bounds": {
             "per_txn_max_paise": draft.per_txn_max_paise,
             "cadence_days": draft.cadence_days,
@@ -260,11 +278,9 @@ def verify_settlement(body: Callback) -> dict:
 
 
 @app.post("/api/webhook/razorpay")
-async def razorpay_webhook(request: Request, secret: str = Body(default="", embed=True)) -> dict:
+async def razorpay_webhook(request: Request) -> dict:
     """Unverified webhooks are discarded. Configure RAZORPAY_WEBHOOK_SECRET to use this."""
-    import os
-
-    configured = os.environ.get("RAZORPAY_WEBHOOK_SECRET", secret)
+    configured = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
     if not configured:
         raise HTTPException(503, "RAZORPAY_WEBHOOK_SECRET is not configured")
     raw = await request.body()

@@ -47,12 +47,7 @@
 
   <div class="card">
     <div class="tag">What should the agent propose?</div>
-    <button class="ghost" data-scenario="honest">
-      <b>The usual basket — ₹1,850</b><span>12 groceries, reported truthfully</span></button>
-    <button class="ghost" data-scenario="overcap">
-      <b>Basket with earbuds and a phone case — ₹2,400</b><span>over cap, and two items off-scope</span></button>
-    <button class="ghost" data-scenario="lying">
-      <b>Claim ₹1,850, hide a ₹15,000 smartwatch</b><span>the agent lies about its own cart</span></button>
+    <div id="buttons"></div>
   </div>
 
   <div class="card" id="result" hidden>
@@ -77,17 +72,9 @@ const rupees = (p) => "₹" + (p/100).toLocaleString("en-IN");
 const msg = (t,k) => { $("msg").textContent = t; $("msg").className = "msg show " + k; };
 const clear = () => { $("msg").className = "msg"; };
 
-const USUAL = ["Aashirvaad atta 5kg","Basmati rice 1kg","Toned milk 1L x2","Eggs (12)",
-  "Filter coffee 500g","Bananas 1kg","Toor dal 1kg","Sunflower oil 1L","Onions 2kg",
-  "Brown bread","Curd 400g","Cow ghee 500ml"];
-
-const SCENARIOS = {
-  honest: { items: USUAL, claimed_total_paise: 185000 },
-  overcap:{ items: [...USUAL, "Bluetooth earbuds", "Phone case"], claimed_total_paise: 240000 },
-  lying:  { items: [...USUAL, "Smartwatch"], claimed_total_paise: 185000 },
-};
 
 let pending = null;
+let SCENARIOS = {};
 
 async function post(url, body) {
   const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
@@ -106,10 +93,11 @@ async function refreshLedger() {
   $("ledgercard").hidden = false;
 }
 
-document.querySelectorAll("[data-scenario]").forEach(btn => btn.onclick = async () => {
+async function propose(key) {
   clear(); $("settle").hidden = true; pending = null;
   try {
-    const d = await post("/api/proposal", SCENARIOS[btn.dataset.scenario]);
+    const { items, claimed_total_paise } = SCENARIOS[key];
+    const d = await post("/api/proposal", { items, claimed_total_paise });
     $("result").hidden = false;
     $("verdict").textContent = d.verdict;
     $("verdict").className = "verdict " + d.verdict;
@@ -125,7 +113,14 @@ document.querySelectorAll("[data-scenario]").forEach(btn => btn.onclick = async 
     }
     refreshLedger();
   } catch (e) { msg(e.message, "err"); }
-});
+}
+
+(async () => {
+  SCENARIOS = await (await fetch("/api/scenarios")).json();
+  $("buttons").innerHTML = Object.entries(SCENARIOS).map(([k, s]) =>
+    `<button class="ghost" data-k="${k}"><b>${s.label}</b><span>${s.note}</span></button>`).join("");
+  document.querySelectorAll("[data-k]").forEach(b => b.onclick = () => propose(b.dataset.k));
+})();
 
 $("pay").onclick = () => {
   clear(); $("pay").disabled = true;

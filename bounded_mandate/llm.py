@@ -31,7 +31,7 @@ def default_client() -> Any:
 
     return OpenAI(
         base_url=BASE_URL,
-        api_key=os.environ.get("NVIDIA_API_KEY") or os.environ.get("BM_LLM_API_KEY", ""),
+        api_key=os.environ.get("NVIDIA_API_KEY", ""),
         # The SDK already retries 429 and 5xx with exponential backoff — free-tier
         # NIM rate-limits are the expected failure, so give it more attempts than
         # the default 2 rather than writing a retry loop of our own.
