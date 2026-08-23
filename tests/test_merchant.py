@@ -40,7 +40,7 @@ def test_unstocked_item_is_refused():
 def test_search_finds_by_name_and_by_category():
     merchant = MockMerchant()
     assert [i.name for i in merchant.search("ghee")] == ["Cow ghee 500ml"]
-    assert len(merchant.search("groceries")) == 12
+    assert len(merchant.search("groceries")) == 13  # 12 staples + the injected item
 
 
 def test_the_catalog_stocks_something_it_cannot_classify():
