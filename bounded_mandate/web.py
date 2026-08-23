@@ -16,6 +16,7 @@ build-time environment variable.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Request
@@ -23,11 +24,34 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from .compiler import compile_mandate, render
+from .engine import MandateStatus, Policy, Proposal, Verdict, decide
+from .ledger import Ledger
+from .merchant import CATALOG, USUAL_GROCERIES, MockMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
 
 app = FastAPI(title="Bounded Mandate", docs_url="/api/docs")
 
-PAGE = Path(__file__).parent / "static" / "register.html"
+STATIC = Path(__file__).parent / "static"
+
+HOME = "12 Nandidurga Rd, Bengaluru"
+
+# One process-wide engine context. A real deployment would key these per user;
+# the demo has one mandate and one merchant, so a module-level store is honest
+# about what it is rather than pretending to be a database.
+LEDGER = Ledger(os.environ.get("BM_LEDGER", "ledger.jsonl"))
+MERCHANT = MockMerchant()
+POLICIES: dict[str, Policy] = {
+    "mdt_demo": Policy(
+        mandate_id="mdt_demo",
+        per_txn_max_paise=200_000,
+        merchants=frozenset({"instamart"}),
+        categories=frozenset({"groceries"}),
+        delivery_addresses=frozenset({HOME}),
+        max_charges_per_window=1,
+        window_days=4,
+        status=MandateStatus.ACTIVE,
+    )
+}
 
 # Test-mode placeholders. A real deployment reads these off the signed-in user.
 DEMO_CUSTOMER = {
@@ -60,7 +84,35 @@ class Callback(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 def register_page() -> str:
-    return PAGE.read_text(encoding="utf-8")
+    return (STATIC / "register.html").read_text(encoding="utf-8")
+
+
+@app.get("/order", response_class=HTMLResponse)
+def order_page() -> str:
+    return (STATIC / "order.html").read_text(encoding="utf-8")
+
+
+@app.get("/api/catalog")
+def catalog() -> dict:
+    return {
+        "usual": list(USUAL_GROCERIES),
+        "items": [
+            {"name": i.name, "paise": i.price_paise, "category": i.category or None}
+            for i in CATALOG.values()
+        ],
+    }
+
+
+@app.get("/api/ledger")
+def ledger_entries() -> dict:
+    """The audit trail, and whether the chain still verifies."""
+    rows = [{"seq": e.seq, "ts": e.ts, **e.payload} for e in LEDGER.entries()]
+    try:
+        LEDGER.verify()
+        intact = True
+    except Exception:
+        intact = False
+    return {"chain_intact": intact, "entries": rows[-20:]}
 
 
 @app.post("/api/mandate/compile")
@@ -126,6 +178,85 @@ def verify_registration(body: Callback) -> dict:
         token_id = None  # verified, but the token is not readable yet
 
     return {"verified": True, "token_id": token_id, "payment_id": body.razorpay_payment_id}
+
+
+class ProposalRequest(BaseModel):
+    items: list[str] = Field(
+        min_length=1, description="Catalog item names the agent put in the cart"
+    )
+    claimed_total_paise: int = Field(gt=0, description="What the agent says the cart comes to")
+    mandate_id: str = "mdt_demo"
+
+
+@app.post("/api/proposal")
+def submit_proposal(body: ProposalRequest) -> dict:
+    """The agent proposes. The engine decides. Only an ALLOW reaches the rail.
+
+    The Razorpay order is created server-side with nobody present — that half
+    of settlement needs no mandate. On an account with recurring enabled the
+    engine would go on to debit the mandate token silently; without one, the
+    order is where the money leg stops, and the response says so.
+    """
+    try:
+        cart = MERCHANT.create_cart(body.items, delivery_address=HOME)
+    except KeyError as exc:
+        raise HTTPException(400, f"not stocked: {exc.args[0]}") from exc
+
+    decision = decide(
+        Proposal(body.mandate_id, cart.cart_id, body.claimed_total_paise),
+        policies=POLICIES,
+        adapter=MERCHANT,
+        ledger=LEDGER,
+    )
+    out = {
+        "verdict": decision.verdict.value,
+        "reason_code": decision.reason_code,
+        "reasons": [{"code": r.code, "detail": r.detail} for r in decision.reasons],
+        "cart_id": cart.cart_id,
+        "real_total_paise": decision.total_paise,
+        "claimed_total_paise": body.claimed_total_paise,
+        "idempotency_key": decision.idempotency_key,
+        "order_id": None,
+        "key_id": None,
+    }
+    if decision.verdict is not Verdict.ALLOW:
+        return out
+
+    gw = gateway()
+    try:
+        out["order_id"] = gw.create_charge_order(
+            amount_paise=decision.total_paise,
+            idempotency_key=decision.idempotency_key,
+            description=f"Bounded Mandate · {len(cart.items)} items",
+        )
+        out["key_id"] = gw.key_id
+    except GatewayAuthError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    except GatewayError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return out
+
+
+@app.post("/api/settlement/verify")
+def verify_settlement(body: Callback) -> dict:
+    """Confirm a settlement callback and write the Razorpay reference to the ledger."""
+    gw = gateway()
+    try:
+        gw.verify_registration(
+            body.razorpay_order_id, body.razorpay_payment_id, body.razorpay_signature
+        )
+    except SignatureMismatch as exc:
+        raise HTTPException(400, "signature verification failed") from exc
+
+    LEDGER.append(
+        {
+            "event": "SETTLED",
+            "razorpay_order_id": body.razorpay_order_id,
+            "razorpay_payment_id": body.razorpay_payment_id,
+            "signature_verified": True,
+        }
+    )
+    return {"verified": True, "payment_id": body.razorpay_payment_id}
 
 
 @app.post("/api/webhook/razorpay")

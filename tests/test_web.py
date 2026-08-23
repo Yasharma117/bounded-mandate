@@ -8,6 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bounded_mandate import web
+from bounded_mandate.ledger import Ledger
+from bounded_mandate.merchant import USUAL_GROCERIES, MockMerchant
 from bounded_mandate.razorpay_gateway import GatewayAuthError, GatewayError, SignatureMismatch
 
 
@@ -35,14 +37,96 @@ class FakeGateway:
     def token_for(self, _):
         return "token_abc"
 
+    key_id = "rzp_test_key"
+
+    def create_charge_order(self, *, amount_paise, idempotency_key, description):
+        self.charged.append(amount_paise)
+        return "order_charge_1"
+
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     gw = FakeGateway()
     monkeypatch.setattr(web, "RazorpayGateway", lambda *a, **k: gw)
+    monkeypatch.setattr(web, "LEDGER", Ledger(tmp_path / "ledger.jsonl"))
+    monkeypatch.setattr(web, "MERCHANT", MockMerchant())
     c = TestClient(web.app)
     c.gateway = gw
     return c
+
+
+USUAL = list(USUAL_GROCERIES)
+
+
+def propose(client, items, claimed):
+    return client.post(
+        "/api/proposal", json={"items": items, "claimed_total_paise": claimed}
+    ).json()
+
+
+# --- the engine gates the rail ------------------------------------------------
+
+
+def test_an_allowed_proposal_reaches_razorpay(client):
+    out = propose(client, USUAL, 185_000)
+
+    assert out["verdict"] == "ALLOW"
+    assert out["order_id"] == "order_charge_1"
+    assert client.gateway.charged == [185_000]  # the fetched total, not the claim
+
+
+def test_a_lying_agent_never_reaches_razorpay(client):
+    """The hero, at the HTTP boundary: denied, and no order is created."""
+    out = propose(client, [*USUAL, "Smartwatch"], 185_000)
+
+    assert out["verdict"] == "DENY"
+    assert "provenance.total_mismatch" in out["reason_code"]
+    assert out["order_id"] is None
+    assert client.gateway.charged == []
+
+
+def test_an_escalation_never_reaches_razorpay(client):
+    out = propose(client, [*USUAL, "Bluetooth earbuds", "Phone case"], 240_000)
+
+    assert out["verdict"] == "ESCALATE"
+    assert out["order_id"] is None
+    assert client.gateway.charged == []
+
+
+def test_the_response_shows_both_totals_so_the_lie_is_visible(client):
+    out = propose(client, [*USUAL, "Smartwatch"], 185_000)
+    assert out["claimed_total_paise"] == 185_000
+    assert out["real_total_paise"] == 1_685_000
+
+
+def test_an_unstocked_item_is_a_400(client):
+    assert (
+        client.post(
+            "/api/proposal", json={"items": ["Ferrari"], "claimed_total_paise": 100}
+        ).status_code
+        == 400
+    )
+
+
+# --- settlement ---------------------------------------------------------------
+
+
+def test_a_verified_settlement_is_written_to_the_ledger(client):
+    propose(client, USUAL, 185_000)
+    client.post("/api/settlement/verify", json=CALLBACK)
+
+    entries = client.get("/api/ledger").json()
+    assert entries["chain_intact"]
+    assert entries["entries"][-1]["razorpay_payment_id"] == "pay_1"
+
+
+def test_a_forged_settlement_writes_nothing(client):
+    propose(client, USUAL, 185_000)
+    before = len(client.get("/api/ledger").json()["entries"])
+    client.gateway.verify_error = SignatureMismatch("nope")
+
+    assert client.post("/api/settlement/verify", json=CALLBACK).status_code == 400
+    assert len(client.get("/api/ledger").json()["entries"]) == before
 
 
 def test_the_page_loads_and_pulls_in_razorpay_checkout(client):
@@ -111,9 +195,9 @@ def test_a_callback_missing_any_field_is_refused(client, missing):
     assert client.post("/api/mandate/verify", json=partial).status_code == 422
 
 
-def test_there_is_no_endpoint_that_charges(client):
-    """Charging is user-absent by design. An HTTP route for it would be the
-    confirm dialog this product exists to remove."""
+def test_no_route_moves_money_without_an_engine_verdict(client):
+    """Nothing here accepts \"charge this\" as an instruction. The rail is reached
+    only as a consequence of a proposal the engine allowed."""
     paths = {r.path for r in web.app.routes}
     forbidden = {p for p in paths if "charge" in p or p.rstrip("/").endswith("/pay")}
     assert not forbidden, forbidden

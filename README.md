@@ -240,6 +240,33 @@ build-time environment variable, so there is no frontend env prefix to leak.
 | Token object actually validated | yes — a bad `frequency` and an over-ceiling `max_amount` are both rejected server-side |
 | Checkout modal | loads, renders the correct mandate terms, accepts card entry |
 
+### The first payment through the product path
+
+Not a probe — a proposal the engine authorised, settled on live Razorpay rails,
+reconciled into the hash-chained ledger:
+
+```
+#0  ALLOW    ok.in_policy   185000 paise   key=f90e60c8f1b8
+#1  SETTLED  pay_TTMncCDOzWLlpK            signature_verified=True
+chain_intact: True
+```
+
+```
+pay_TTMncCDOzWLlpK   captured   ₹1,850   card   order_TTMn6oHEMScYXI
+```
+
+The gate held in both directions. `POST /api/proposal` runs the engine first,
+and the Razorpay order is created **only** on `ALLOW`:
+
+| The agent proposes | Verdict | Reached the rail? |
+|---|---|---|
+| the usual basket, reported truthfully | `ALLOW` | yes — order created, ₹1,850 captured |
+| ₹1,850 claimed over a cart hiding a ₹15,000 smartwatch | `DENY` | **no** |
+| earbuds and a phone case, ₹2,400 | `ESCALATE` | **no** |
+
+The amount sent to Razorpay is the total the engine *fetched*, never the total
+the agent claimed. A test asserts that too.
+
 ### A completed test payment
 
 Razorpay gates account activation on one real test transaction. Done, driven

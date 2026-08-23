@@ -172,6 +172,32 @@ class RazorpayGateway:
 
     # --- charging: user-absent, every time -----------------------------------
 
+    def create_charge_order(
+        self, *, amount_paise: int, idempotency_key: str, description: str
+    ) -> str:
+        """Put an authorised charge on Razorpay's rails, server-side.
+
+        This half needs no mandate and no human — the engine calls it the moment
+        a proposal is allowed. On an account with recurring enabled, `charge`
+        goes on to debit the mandate token. Without one, the order is as far as
+        the money leg can go, and the ledger records exactly that rather than
+        implying a completed debit.
+        """
+        if amount_paise < MIN_AMOUNT_PAISE:
+            raise GatewayError(f"amount must be at least {MIN_AMOUNT_PAISE} paise")
+        try:
+            order = self.client.order.create(
+                {
+                    "amount": amount_paise,
+                    "currency": "INR",
+                    "receipt": idempotency_key[:40],
+                    "notes": {"description": description},
+                }
+            )
+        except Exception as exc:
+            raise _wrap(exc, "could not create charge order") from exc
+        return order["id"]
+
     def charge(
         self,
         *,
@@ -188,24 +214,17 @@ class RazorpayGateway:
         `idempotency_key` rides along as the receipt so a retried charge is
         identifiable at Razorpay's end as well as in our ledger.
         """
-        if amount_paise < MIN_AMOUNT_PAISE:
-            raise GatewayError(f"amount must be at least {MIN_AMOUNT_PAISE} paise")
+        order_id = self.create_charge_order(
+            amount_paise=amount_paise, idempotency_key=idempotency_key, description=description
+        )
         try:
-            order = self.client.order.create(
-                {
-                    "amount": amount_paise,
-                    "currency": "INR",
-                    "receipt": idempotency_key[:40],
-                    "payment_capture": True,
-                }
-            )
             return self.client.payment.createRecurring(
                 {
                     "email": email,
                     "contact": contact,
                     "amount": amount_paise,
                     "currency": "INR",
-                    "order_id": order["id"],
+                    "order_id": order_id,
                     "customer_id": customer_id,
                     "token": token_id,
                     "recurring": "1",

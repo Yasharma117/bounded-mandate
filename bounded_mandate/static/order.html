@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bounded Mandate · Agent run</title>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<style>
+  :root{--bg:#02042B;--surface:#0B1039;--line:#1E2559;--ink:#EEF1FF;--muted:#8E96C8;
+        --accent:#3395FF;--bad:#FF6B6B;--good:#3ECF8E;--warn:#F0B968;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,sans-serif;
+       padding:24px;display:flex;justify-content:center}
+  main{width:100%;max-width:560px}
+  h1{font-size:20px;font-weight:600}
+  .sub{color:var(--muted);font-size:14px;margin:6px 0 20px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px}
+  .tag{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px}
+  button{border:none;border-radius:10px;font-family:inherit;font-size:14px;font-weight:600;
+         padding:12px;cursor:pointer;width:100%;margin-bottom:8px}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .primary{background:var(--accent);color:#031024}
+  .ghost{background:transparent;border:1px solid var(--line);color:var(--ink);font-weight:500;text-align:left}
+  .ghost b{display:block;font-weight:600;margin-bottom:2px}
+  .ghost span{color:var(--muted);font-size:12.5px;font-weight:400}
+  .verdict{font-size:26px;font-weight:700;letter-spacing:-.02em}
+  .ALLOW{color:var(--good)} .DENY{color:var(--bad)}
+  .ESCALATE{color:var(--warn)} .CLARIFY{color:var(--accent)}
+  code{font-family:ui-monospace,monospace;font-size:12.5px;color:var(--muted);word-break:break-all}
+  .reason{border-left:2px solid var(--line);padding:8px 0 8px 12px;margin-top:10px;font-size:13.5px;line-height:1.5}
+  .reason b{display:block;font-family:ui-monospace,monospace;font-size:11.5px;color:var(--muted);
+            text-transform:none;margin-bottom:3px}
+  .msg{border-radius:10px;padding:12px 14px;font-size:13.5px;margin-bottom:14px;display:none;line-height:1.5}
+  .msg.show{display:block}
+  .msg.ok{background:rgba(62,207,142,.12);border:1px solid rgba(62,207,142,.3);color:var(--good)}
+  .msg.err{background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.3);color:var(--bad)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  td{padding:7px 0;border-bottom:1px solid var(--line);color:var(--muted)}
+  td:last-child{text-align:right;color:var(--ink);font-family:ui-monospace,monospace;font-size:11.5px}
+</style>
+</head>
+<body><main>
+  <h1>Agent run</h1>
+  <p class="sub">Standing rule: groceries from Instamart, every 4 days, under ₹2,000.</p>
+
+  <div id="msg" class="msg"></div>
+
+  <div class="card">
+    <div class="tag">What should the agent propose?</div>
+    <button class="ghost" data-scenario="honest">
+      <b>The usual basket — ₹1,850</b><span>12 groceries, reported truthfully</span></button>
+    <button class="ghost" data-scenario="overcap">
+      <b>Basket with earbuds and a phone case — ₹2,400</b><span>over cap, and two items off-scope</span></button>
+    <button class="ghost" data-scenario="lying">
+      <b>Claim ₹1,850, hide a ₹15,000 smartwatch</b><span>the agent lies about its own cart</span></button>
+  </div>
+
+  <div class="card" id="result" hidden>
+    <div class="tag">Engine decision</div>
+    <div class="verdict" id="verdict"></div>
+    <div style="margin-top:6px"><code id="reasoncode"></code></div>
+    <div id="reasons"></div>
+    <div id="totals" style="margin-top:14px"></div>
+    <div id="settle" hidden style="margin-top:16px">
+      <button class="primary" id="pay">Settle ₹<span id="payamt"></span> on Razorpay</button>
+    </div>
+  </div>
+
+  <div class="card" id="ledgercard" hidden>
+    <div class="tag">Audit ledger · <span id="chain"></span></div>
+    <table id="ledger"></table>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const rupees = (p) => "₹" + (p/100).toLocaleString("en-IN");
+const msg = (t,k) => { $("msg").textContent = t; $("msg").className = "msg show " + k; };
+const clear = () => { $("msg").className = "msg"; };
+
+const USUAL = ["Aashirvaad atta 5kg","Basmati rice 1kg","Toned milk 1L x2","Eggs (12)",
+  "Filter coffee 500g","Bananas 1kg","Toor dal 1kg","Sunflower oil 1L","Onions 2kg",
+  "Brown bread","Curd 400g","Cow ghee 500ml"];
+
+const SCENARIOS = {
+  honest: { items: USUAL, claimed_total_paise: 185000 },
+  overcap:{ items: [...USUAL, "Bluetooth earbuds", "Phone case"], claimed_total_paise: 240000 },
+  lying:  { items: [...USUAL, "Smartwatch"], claimed_total_paise: 185000 },
+};
+
+let pending = null;
+
+async function post(url, body) {
+  const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  const d = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(d.detail || `${r.status}`);
+  return d;
+}
+
+async function refreshLedger() {
+  const d = await (await fetch("/api/ledger")).json();
+  $("chain").textContent = d.chain_intact ? "hash chain verifies" : "CHAIN BROKEN";
+  $("chain").style.color = d.chain_intact ? "var(--good)" : "var(--bad)";
+  $("ledger").innerHTML = d.entries.slice().reverse().map(e =>
+    `<tr><td>${e.event === "SETTLED" ? "settled" : (e.verdict||"").toLowerCase()}</td>
+         <td>${e.event === "SETTLED" ? e.razorpay_payment_id : (e.reason_code||"")}</td></tr>`).join("");
+  $("ledgercard").hidden = false;
+}
+
+document.querySelectorAll("[data-scenario]").forEach(btn => btn.onclick = async () => {
+  clear(); $("settle").hidden = true; pending = null;
+  try {
+    const d = await post("/api/proposal", SCENARIOS[btn.dataset.scenario]);
+    $("result").hidden = false;
+    $("verdict").textContent = d.verdict;
+    $("verdict").className = "verdict " + d.verdict;
+    $("reasoncode").textContent = d.reason_code;
+    $("reasons").innerHTML = d.reasons.map(r =>
+      `<div class="reason"><b>${r.code}</b>${r.detail}</div>`).join("");
+    $("totals").innerHTML =
+      `<table><tr><td>Agent claimed</td><td>${rupees(d.claimed_total_paise)}</td></tr>
+       <tr><td>Cart the engine fetched</td><td>${rupees(d.real_total_paise)}</td></tr></table>`;
+    if (d.verdict === "ALLOW" && d.order_id) {
+      pending = d; $("payamt").textContent = (d.real_total_paise/100).toLocaleString("en-IN");
+      $("settle").hidden = false;
+    }
+    refreshLedger();
+  } catch (e) { msg(e.message, "err"); }
+});
+
+$("pay").onclick = () => {
+  clear(); $("pay").disabled = true;
+  const rzp = new Razorpay({
+    key: pending.key_id, order_id: pending.order_id,
+    amount: pending.real_total_paise, currency: "INR",
+    name: "Bounded Mandate", description: "Authorised grocery order",
+    prefill: { name:"Yash Sharma", email:"yash.republic@gmail.com", contact:"8095551234" },
+    handler: async (r) => {
+      try {
+        const out = await post("/api/settlement/verify", r);
+        msg(`Payment received — ${out.payment_id}. Signature verified, ledger updated.`, "ok");
+        refreshLedger();
+      } catch (e) { msg("Could not verify: " + e.message, "err"); $("pay").disabled = false; }
+    },
+    modal: { ondismiss: () => { msg("Cancelled — nothing settled.", "err"); $("pay").disabled = false; } },
+  });
+  rzp.on("payment.failed", (e) => {
+    msg("Payment failed: " + (e.error?.description || "unknown"), "err"); $("pay").disabled = false;
+  });
+  rzp.open();
+};
+</script></body></html>
