@@ -14,6 +14,7 @@ from datetime import timedelta
 import pytest
 
 from bounded_mandate import Cart, CartItem, MandateStatus, Proposal, Verdict, decide
+from bounded_mandate.engine import PROBE_THRESHOLD, PROBE_WINDOW
 from tests.conftest import HOME, NOW, groceries, merchant_holding
 
 
@@ -252,3 +253,85 @@ def test_layer_2_outage_does_not_weaken_layer_1(policies, ledger):
     # Both facts recorded: the bound was breached, and Layer 2 was down for it.
     assert decision.verdict is Verdict.ESCALATE
     assert decision.reason_code == "cap.exceeded+semantic.unavailable"
+
+
+# --- a pattern of refusals is itself a finding -------------------------------
+
+
+def _deny_once(policies, ledger, n, now):
+    """One refused proposal: a cart with a smartwatch in it, reported as groceries."""
+    cart = Cart(
+        cart_id=f"probe_{n}",
+        merchant="instamart",
+        items=(CartItem("Smartwatch", 1_500_000, "electronics"),),
+        delivery_address=HOME,
+    )
+    return decide(
+        Proposal("mdt_1", cart.cart_id, 185_000),
+        policies=policies,
+        adapter=merchant_holding(cart),
+        ledger=ledger,
+        now=now,
+    )
+
+
+def test_a_single_refusal_is_not_a_pattern(policies, ledger):
+    assert _deny_once(policies, ledger, 1, NOW).verdict is Verdict.DENY
+    clean = run(
+        Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(groceries()), ledger
+    )
+    assert clean.verdict is Verdict.ALLOW
+    assert clean.reason_code == "ok.in_policy"
+
+
+def test_repeated_refusals_stop_the_silent_path(policies, ledger):
+    """After probing, even a clean basket needs a human. That is the point."""
+    for n in range(PROBE_THRESHOLD):
+        assert _deny_once(policies, ledger, n, NOW).verdict is Verdict.DENY
+
+    clean = run(
+        Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(groceries()), ledger
+    )
+
+    assert clean.verdict is Verdict.ESCALATE
+    assert clean.reason_code == "agent.probing"
+
+
+def test_probing_is_surfaced_on_the_refusal_itself(policies, ledger):
+    for n in range(PROBE_THRESHOLD):
+        _deny_once(policies, ledger, n, NOW)
+
+    another = _deny_once(policies, ledger, 99, NOW)
+
+    assert another.verdict is Verdict.DENY  # still denied, and now also flagged
+    assert "agent.probing" in another.reason_code
+
+
+def test_old_refusals_do_not_count(policies, ledger):
+    """Probing is a burst. Yesterday's mistakes are not evidence of one."""
+    stale = NOW - PROBE_WINDOW - timedelta(minutes=1)
+    for n in range(PROBE_THRESHOLD + 2):
+        _deny_once(policies, ledger, n, stale)
+
+    clean = run(
+        Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(groceries()), ledger
+    )
+    assert clean.verdict is Verdict.ALLOW
+
+
+def test_escalations_are_not_counted_as_probing(policies, ledger):
+    """An over-cap basket is a boundary, not an attack. Three do not make a pattern."""
+    for n in range(PROBE_THRESHOLD + 1):
+        over = Cart(
+            cart_id=f"over_{n}",
+            merchant="instamart",
+            items=(CartItem("Caviar", 900_000, "groceries"),),
+            delivery_address=HOME,
+        )
+        d = run(Proposal("mdt_1", over.cart_id, 900_000), policies, merchant_holding(over), ledger)
+        assert d.verdict is Verdict.ESCALATE
+
+    clean = run(
+        Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(groceries()), ledger
+    )
+    assert clean.verdict is Verdict.ALLOW

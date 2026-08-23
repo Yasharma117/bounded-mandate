@@ -177,6 +177,35 @@ Layer 2 is backed by NIM (see below) and returns *concerns*, which the engine
 coerces to `ESCALATE`. There is no value it can return that approves anything —
 which is what makes a compromised Layer 2 harmless rather than catastrophic.
 
+### A pattern of refusals is itself a finding
+
+One refused proposal is ordinary; an agent can be wrong. Several in an hour is
+not — it is something testing where the edges are. Past `PROBE_THRESHOLD`
+refusals in an hour, `agent.probing` attaches to every decision under that
+mandate.
+
+The consequence is the part that matters. It escalates rather than denies,
+**including proposals that would otherwise pass cleanly**:
+
+```
+claimed 1345000 -> DENY  provenance.total_mismatch+category.not_allowed+cap.exceeded
+claimed 1000000 -> DENY  ...
+claimed  500000 -> DENY  ...
+claimed  100000 -> DENY  ...+agent.probing
+
+then the same agent submits ₹1,850 of ordinary groceries, all in policy:
+                 -> ESCALATE  agent.probing
+```
+
+The basket in front of you may be perfectly fine. The point is that nobody
+should take that on trust from an agent that has spent the last hour testing
+the fence. Silent execution is a privilege extended to a well-behaved agent,
+and it is withdrawable.
+
+Escalations are deliberately **not** counted. An over-cap basket is a boundary
+being reached, not an attack, and treating ordinary friction as evidence of
+compromise would make the signal useless.
+
 ### When Layer 2 is down
 
 The model is the one part of the engine that can be unreachable. The choice
@@ -235,6 +264,7 @@ violation. Different reason codes, different UX. Severity orders
 | `delivery.unknown_address` | `ESCALATE` | shipping to an unauthorized address |
 | `frequency.exceeded` | `ESCALATE` | Nth charge this window over the limit |
 | `intent.mismatch` | `ESCALATE` | Layer 2 raised a concern |
+| `agent.probing` | `ESCALATE` | a burst of refusals — the agent looks compromised |
 | `semantic.unavailable` | *(none)* | Layer 2 could not run; decided on Layer 1 alone |
 
 Merchant, category and delivery are separate policy dimensions on purpose.

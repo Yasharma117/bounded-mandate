@@ -40,6 +40,14 @@ class Verdict(StrEnum):
 _SEVERITY = {Verdict.ALLOW: 0, Verdict.CLARIFY: 1, Verdict.ESCALATE: 2, Verdict.DENY: 3}
 
 
+# A refused proposal is ordinary — an agent can be wrong. A burst of them is
+# not: it is something testing where the edges are. Once that pattern shows,
+# nothing under this mandate runs silently until a human has looked, including
+# proposals that would otherwise pass cleanly.
+PROBE_THRESHOLD = 3
+PROBE_WINDOW = timedelta(hours=1)
+
+
 class MandateStatus(StrEnum):
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
@@ -240,22 +248,52 @@ def _semantic_reasons(cart: Cart, policy: Policy, check: SemanticCheck | None) -
     return [Reason("intent.mismatch", Verdict.ESCALATE, concern) for concern in concerns]
 
 
-def _prior_charges(ledger: Ledger, policy: Policy, now: datetime) -> tuple[int, set[str]]:
-    """Authorisations already granted under this mandate inside the window.
+@dataclass(frozen=True)
+class _History:
+    """What the ledger already knows about this mandate."""
 
-    ponytail: full scan of the ledger per decision. Trivial at demo volume;
-    index by mandate id if the ledger ever grows past memory.
+    charges_in_window: int
+    charged_keys: frozenset[str]
+    recent_denials: int
+
+
+def _history(ledger: Ledger, policy: Policy, now: datetime) -> _History:
+    """One pass over the ledger for everything the decision needs from it.
+
+    ponytail: full scan per decision. Trivial at demo volume; index by mandate
+    id if the ledger ever grows past memory.
     """
-    since = (now - timedelta(days=policy.window_days)).isoformat()
-    count, keys = 0, set()
+    since_window = (now - timedelta(days=policy.window_days)).isoformat()
+    since_probe = (now - PROBE_WINDOW).isoformat()
+    charges, keys, denials = 0, set(), 0
     for entry in ledger.entries():
         p = entry.payload
-        if p.get("mandate_id") != policy.mandate_id or p.get("verdict") != Verdict.ALLOW.value:
+        if p.get("mandate_id") != policy.mandate_id:
             continue
-        if entry.ts >= since:
-            count += 1
-        keys.add(p.get("idempotency_key"))
-    return count, keys
+        if p.get("verdict") == Verdict.ALLOW.value:
+            if entry.ts >= since_window:
+                charges += 1
+            keys.add(p.get("idempotency_key"))
+        elif p.get("verdict") == Verdict.DENY.value and entry.ts >= since_probe:
+            denials += 1
+    return _History(charges, frozenset(keys), denials)
+
+
+def _probe_reason(denials: int) -> list[Reason]:
+    """A pattern of refusals is itself a finding, and the user is the one who
+    needs it. Escalate rather than deny: the proposal in front of us may be
+    perfectly fine, and the point is that nobody should take that on trust from
+    an agent that has spent the last hour testing the fence."""
+    if denials < PROBE_THRESHOLD:
+        return []
+    return [
+        Reason(
+            "agent.probing",
+            Verdict.ESCALATE,
+            f"{denials} refused attempts in the last hour. This agent may be "
+            f"compromised — nothing runs on its own until you have looked.",
+        )
+    ]
 
 
 def decide(
@@ -315,14 +353,15 @@ def decide(
             )
         )
 
-    prior_charges, charged_keys = _prior_charges(ledger, policy, now)
-    if key in charged_keys:
+    history = _history(ledger, policy, now)
+    if key in history.charged_keys:
         reasons.append(
             Reason("duplicate.suppressed", Verdict.DENY, "This cart was already authorised.")
         )
 
     reasons += _mandate_reasons(policy, now)
-    reasons += _policy_reasons(cart, policy, prior_charges)
+    reasons += _policy_reasons(cart, policy, history.charges_in_window)
+    reasons += _probe_reason(history.recent_denials)
 
     # The model runs only when the rules would otherwise wave this through, and
     # only to narrow. Skipping it on an already-fatal proposal saves a call and
