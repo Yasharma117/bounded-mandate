@@ -218,10 +218,26 @@ def _semantic_reasons(cart: Cart, policy: Policy, check: SemanticCheck | None) -
     Whatever it returns is coerced to ESCALATE. There is no return value that
     approves anything, so injecting the model cannot widen the agent's
     authority; the worst it achieves is tripping a flag, which fails safe.
+
+    If the provider is unreachable the layer is skipped rather than failing the
+    proposal: Layer 1 enforces every hard bound on its own, and escalating every
+    grocery order during an outage would turn the product into the confirm
+    dialog it exists to avoid. But the skip is written to the ledger, because a
+    decision made with a layer down must not look fully checked afterwards.
     """
     if check is None:
         return []
-    return [Reason("intent.mismatch", Verdict.ESCALATE, concern) for concern in check(cart, policy)]
+    try:
+        concerns = check(cart, policy)
+    except Exception:
+        return [
+            Reason(
+                "semantic.unavailable",
+                Verdict.ALLOW,
+                "Semantic check did not run; decided on deterministic policy alone.",
+            )
+        ]
+    return [Reason("intent.mismatch", Verdict.ESCALATE, concern) for concern in concerns]
 
 
 def _prior_charges(ledger: Ledger, policy: Policy, now: datetime) -> tuple[int, set[str]]:

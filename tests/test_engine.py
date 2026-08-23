@@ -214,3 +214,41 @@ def test_semantic_layer_cannot_approve(policies, ledger):
     )
     assert decision.verdict is Verdict.ESCALATE
     assert decision.reason_code == "cap.exceeded"
+
+
+def test_layer_2_outage_is_recorded_not_hidden(policies, ledger):
+    """Fail open — but a decision made with a layer down must say so."""
+
+    def unreachable(cart, policy):
+        raise ConnectionError("NIM unreachable")
+
+    decision = run(
+        Proposal("mdt_1", "cart_1", 185_000),
+        policies,
+        merchant_holding(groceries()),
+        ledger,
+        semantic_check=unreachable,
+    )
+
+    assert decision.verdict is Verdict.ALLOW
+    assert decision.reason_code == "semantic.unavailable"
+
+
+def test_layer_2_outage_does_not_weaken_layer_1(policies, ledger):
+    """The hard bounds are deterministic and hold on their own."""
+
+    def unreachable(cart, policy):
+        raise ConnectionError("NIM unreachable")
+
+    over_cap = replace(groceries(), items=(CartItem("Caviar", 900_000, "groceries"),))
+    decision = run(
+        Proposal("mdt_1", "cart_1", 900_000),
+        policies,
+        merchant_holding(over_cap),
+        ledger,
+        semantic_check=unreachable,
+    )
+
+    # Both facts recorded: the bound was breached, and Layer 2 was down for it.
+    assert decision.verdict is Verdict.ESCALATE
+    assert decision.reason_code == "cap.exceeded+semantic.unavailable"

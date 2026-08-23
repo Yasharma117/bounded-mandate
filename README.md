@@ -126,6 +126,32 @@ never a bare boolean.
 | **1 · Hard policy** | deterministic checks: mandate state, merchant, category, cap, delivery, frequency | **yes — only this** |
 | **2 · Semantic safety** | the model, one-directional; catches what the rules would wrongly wave through | no |
 
+Layer 2 is backed by NIM (see below) and returns *concerns*, which the engine
+coerces to `ESCALATE`. There is no value it can return that approves anything —
+which is what makes a compromised Layer 2 harmless rather than catastrophic.
+
+### When Layer 2 is down
+
+The model is the one part of the engine that can be unreachable. The choice
+there is a real one, so it is written down rather than left to whatever the
+code happens to do.
+
+**Fail open, and record it.** A provider outage skips Layer 2 rather than
+failing the proposal, because Layer 1 enforces every hard bound on its own and
+escalating every grocery order during an outage would turn the product into the
+confirm dialog it exists to avoid. But the skip is written to the ledger as
+`semantic.unavailable`, so a decision made with a layer down never looks fully
+checked afterwards.
+
+`semantic.unavailable` carries no severity of its own — it cannot change a
+verdict, only annotate one. A cap breach during an outage still escalates, and
+the ledger reads `cap.exceeded+semantic.unavailable`: both facts, neither
+hidden.
+
+The tradeoff, stated plainly: an attacker who can deny the provider can disable
+Layer 2. What they cannot do is widen authority, because Layer 1 is
+deterministic and still holds every bound. The degradation is real and bounded.
+
 Checks deliberately do **not** short-circuit. A proposal collects every reason
 it trips and the verdict is the most severe of them, because the escalation
 surface is meant to show *"₹400 over your cap"* **and** *"2 items aren't
@@ -162,6 +188,7 @@ violation. Different reason codes, different UX. Severity orders
 | `delivery.unknown_address` | `ESCALATE` | shipping to an unauthorized address |
 | `frequency.exceeded` | `ESCALATE` | Nth charge this window over the limit |
 | `intent.mismatch` | `ESCALATE` | Layer 2 raised a concern |
+| `semantic.unavailable` | *(none)* | Layer 2 could not run; decided on Layer 1 alone |
 
 Merchant, category and delivery are separate policy dimensions on purpose.
 *"Instamart only"*, *"groceries only"* and *"to my home"* are three different
@@ -198,8 +225,8 @@ With no key set that command still works — it prints the same card marked
 
 Day 3 of 14. **Phase 1 (engine core) — built.** Layer 0 provenance, Layer 1
 hard policy, Layer 2 one-directional hook, four verdicts, idempotency, the
-hash-chained ledger, the policy compiler with its offline fallback, and the
-mock merchant. 48 tests, no network.
+hash-chained ledger, the policy compiler with its offline fallback, the
+model-backed Layer 2, and the mock merchant. 56 tests, no network.
 
 **Not yet verified:** no call has been made against a live NIM endpoint. The
 schema, the guided-decoding wiring, the refusal to invent a bound and every
