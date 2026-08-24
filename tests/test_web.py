@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bounded_mandate import web
+from bounded_mandate.engine import Verdict
 from bounded_mandate.ledger import Ledger
 from bounded_mandate.merchant import USUAL_GROCERIES, MockMerchant
 from bounded_mandate.razorpay_gateway import GatewayAuthError, GatewayError, SignatureMismatch
@@ -206,3 +207,80 @@ def test_no_route_moves_money_without_an_engine_verdict(client):
 def test_webhooks_are_refused_until_a_secret_is_configured(client, monkeypatch):
     monkeypatch.delenv("RAZORPAY_WEBHOOK_SECRET", raising=False)
     assert client.post("/api/webhook/razorpay", json={}).status_code == 503
+
+
+# --- the agent route -------------------------------------------------------
+
+
+class FakeAgent:
+    """Stands in for the model. The engine it calls is the real one."""
+
+    def __init__(self, run_result=None, blow_up=False, **kwargs):
+        self.kwargs = kwargs
+        self.run_result, self.blow_up = run_result, blow_up
+
+    def run(self, instruction, **_):
+        if self.blow_up:
+            raise RuntimeError("model unreachable")
+        return self.run_result
+
+
+def _agent_run(verdict, *, claimed=185_000, said="Ordered."):
+    from bounded_mandate.agent import AgentRun, Step
+    from bounded_mandate.engine import Decision, Reason
+
+    run = AgentRun(instruction="order the usual")
+    run.said = said
+    run.steps = [
+        Step("create_cart", {"item_names": ["Milk"]}, {"cart_id": "c1", "item_count": 12}),
+        Step("request_charge", {"cart_id": "c1", "claimed_total_paise": claimed}, {}),
+    ]
+    run.decision = Decision(
+        verdict=verdict,
+        reasons=() if verdict is Verdict.ALLOW else (Reason("cap.exceeded", verdict, "Too much."),),
+        mandate_id="mdt_demo",
+        cart_id="c1",
+        total_paise=185_000,
+        idempotency_key="k" * 32,
+    )
+    return run
+
+
+def test_the_agent_route_reports_what_the_agent_did_and_what_the_engine_ruled(client, monkeypatch):
+    monkeypatch.setattr(
+        web, "BuyerAgent", lambda **kw: FakeAgent(run_result=_agent_run(Verdict.ALLOW), **kw)
+    )
+    body = client.post("/api/agent", json={"text": "order the usual"}).json()
+    assert body["said"] == "Ordered."
+    assert [s["tool"] for s in body["steps"]] == ["create_cart", "request_charge"]
+    assert body["decision"]["verdict"] == "ALLOW"
+    assert body["decision"]["order_id"] == "order_charge_1"
+
+
+def test_a_refused_agent_run_creates_no_order(client, monkeypatch):
+    monkeypatch.setattr(
+        web, "BuyerAgent", lambda **kw: FakeAgent(run_result=_agent_run(Verdict.DENY), **kw)
+    )
+    decision = client.post("/api/agent", json={"text": "order the usual"}).json()["decision"]
+    assert decision["verdict"] == "DENY"
+    assert decision["order_id"] is None
+    assert client.gateway.charged == []
+
+
+def test_the_adversarial_flag_changes_the_agent_not_the_engine(client, monkeypatch):
+    seen = {}
+
+    def capture(**kw):
+        seen.update(kw)
+        return FakeAgent(run_result=_agent_run(Verdict.DENY), **kw)
+
+    monkeypatch.setattr(web, "BuyerAgent", capture)
+    client.post("/api/agent", json={"text": "order the usual", "adversarial": True})
+    assert seen["system"] is not None
+    # The policy handed to the agent is the same object the engine enforces.
+    assert seen["policies"] is web.POLICIES
+
+
+def test_a_model_outage_is_a_502_not_a_silent_approval(client, monkeypatch):
+    monkeypatch.setattr(web, "BuyerAgent", lambda **kw: FakeAgent(blow_up=True, **kw))
+    assert client.post("/api/agent", json={"text": "order the usual"}).status_code == 502

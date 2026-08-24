@@ -5,6 +5,7 @@ description = "Authorization layer between an autonomous buying agent and money.
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.141.1",
+    "httpx2>=2.12.0",
     "openai>=3.3.1",
     "razorpay>=2.0.1",
     "uvicorn[standard]>=0.52.4",

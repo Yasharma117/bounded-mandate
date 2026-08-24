@@ -20,14 +20,16 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
+from .agent import ADVERSARIAL_SYSTEM, BuyerAgent
 from .compiler import compile_mandate
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import Ledger
 from .merchant import USUAL_GROCERIES, MockMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
+from .voice import VoiceUnavailable, speak, transcribe
 
 app = FastAPI(title="Bounded Mandate", docs_url="/api/docs")
 
@@ -89,6 +91,40 @@ def gateway() -> RazorpayGateway:
         return RazorpayGateway()
     except GatewayError as exc:
         raise HTTPException(503, str(exc)) from exc
+
+
+def _settle(decision, cart_items: int) -> dict:
+    """An ALLOW is the only thing that reaches the rail. The order is created
+    server-side with nobody present — that half of settlement needs no mandate.
+    On an account with recurring enabled the engine would go on to debit the
+    token silently; without one, the order is where the money leg stops."""
+    if decision.verdict is not Verdict.ALLOW:
+        return {"order_id": None, "key_id": None}
+    gw = gateway()
+    try:
+        order_id = gw.create_charge_order(
+            amount_paise=decision.total_paise,
+            idempotency_key=decision.idempotency_key,
+            description=f"Bounded Mandate · {cart_items} items",
+        )
+    except GatewayAuthError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    except GatewayError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return {"order_id": order_id, "key_id": gw.key_id}
+
+
+def _rendered(decision, *, claimed_total_paise: int, cart_items: int) -> dict:
+    return {
+        "verdict": decision.verdict.value,
+        "reason_code": decision.reason_code,
+        "reasons": [{"code": r.code, "detail": r.detail} for r in decision.reasons],
+        "cart_id": decision.cart_id,
+        "real_total_paise": decision.total_paise,
+        "claimed_total_paise": claimed_total_paise,
+        "idempotency_key": decision.idempotency_key,
+        **_settle(decision, cart_items),
+    }
 
 
 class Utterance(BaseModel):
@@ -208,13 +244,7 @@ class ProposalRequest(BaseModel):
 
 @app.post("/api/proposal")
 def submit_proposal(body: ProposalRequest) -> dict:
-    """The agent proposes. The engine decides. Only an ALLOW reaches the rail.
-
-    The Razorpay order is created server-side with nobody present — that half
-    of settlement needs no mandate. On an account with recurring enabled the
-    engine would go on to debit the mandate token silently; without one, the
-    order is where the money leg stops, and the response says so.
-    """
+    """A cart, proposed directly. The engine decides; only an ALLOW reaches the rail."""
     try:
         cart = MERCHANT.create_cart(body.items, delivery_address=HOME)
     except KeyError as exc:
@@ -226,33 +256,54 @@ def submit_proposal(body: ProposalRequest) -> dict:
         adapter=MERCHANT,
         ledger=LEDGER,
     )
-    out = {
-        "verdict": decision.verdict.value,
-        "reason_code": decision.reason_code,
-        "reasons": [{"code": r.code, "detail": r.detail} for r in decision.reasons],
-        "cart_id": cart.cart_id,
-        "real_total_paise": decision.total_paise,
-        "claimed_total_paise": body.claimed_total_paise,
-        "idempotency_key": decision.idempotency_key,
-        "order_id": None,
-        "key_id": None,
-    }
-    if decision.verdict is not Verdict.ALLOW:
-        return out
+    return _rendered(
+        decision, claimed_total_paise=body.claimed_total_paise, cart_items=len(cart.items)
+    )
 
-    gw = gateway()
+
+class Instruction(BaseModel):
+    text: str = Field(min_length=1, description="What the user said, typed or spoken")
+    adversarial: bool = Field(
+        default=False,
+        description="Run the compromised agent instead. The engine is not told which.",
+    )
+
+
+@app.post("/api/agent")
+def run_agent(body: Instruction) -> dict:
+    """Hand an instruction to the buyer agent and report what it did.
+
+    The agent shops and proposes. It holds no Razorpay tool and cannot read the
+    policy it is governed by, so `adversarial` changes only what the agent tries
+    — never what the engine permits.
+    """
+    agent = BuyerAgent(
+        merchant=MERCHANT,
+        policies=POLICIES,
+        ledger=LEDGER,
+        mandate_id="mdt_demo",
+        delivery_address=HOME,
+        system=ADVERSARIAL_SYSTEM if body.adversarial else None,
+    )
     try:
-        out["order_id"] = gw.create_charge_order(
-            amount_paise=decision.total_paise,
-            idempotency_key=decision.idempotency_key,
-            description=f"Bounded Mandate · {len(cart.items)} items",
-        )
-        out["key_id"] = gw.key_id
-    except GatewayAuthError as exc:
-        raise HTTPException(401, str(exc)) from exc
-    except GatewayError as exc:
-        raise HTTPException(500, str(exc)) from exc
-    return out
+        run = agent.run(body.text)
+    except Exception as exc:  # a model outage is a 502, not a silent approval
+        raise HTTPException(502, f"the agent could not run: {exc}") from exc
+
+    charge = next((s for s in reversed(run.steps) if s.tool == "request_charge"), None)
+    claimed = int(charge.args.get("claimed_total_paise") or 0) if charge else 0
+    cart = next((s for s in run.steps if s.tool == "create_cart"), None)
+    items = int(cart.result.get("item_count") or 0) if cart else 0
+
+    return {
+        "said": run.said,
+        "steps": [{"tool": s.tool, "args": s.args, "result": s.result} for s in run.steps],
+        "decision": (
+            _rendered(run.decision, claimed_total_paise=claimed, cart_items=items)
+            if run.decision
+            else None
+        ),
+    }
 
 
 @app.post("/api/settlement/verify")
@@ -289,3 +340,28 @@ async def razorpay_webhook(request: Request) -> dict:
     except SignatureMismatch as exc:
         raise HTTPException(400, "webhook signature did not verify") from exc
     return {"received": True}
+
+
+@app.post("/api/voice/transcribe")
+async def transcribe_speech(request: Request) -> dict:
+    """Raw audio bytes in, text out. The transcript is fed to the agent as an
+    *utterance*, with no more standing than typing it — the engine still decides.
+
+        curl --data-binary @clip.m4a http://127.0.0.1:8117/api/voice/transcribe
+    """
+    audio = await request.body()
+    if not audio:
+        raise HTTPException(400, "no audio")
+    try:
+        return {"text": transcribe(audio)}
+    except VoiceUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.post("/api/voice/speak")
+def speak_text(body: Utterance) -> Response:
+    """Text in, mp3 out. The app plays it; the key stays here."""
+    try:
+        return Response(speak(body.text), media_type="audio/mpeg")
+    except VoiceUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
