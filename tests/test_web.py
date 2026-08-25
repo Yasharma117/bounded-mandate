@@ -8,9 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bounded_mandate import web
+from bounded_mandate.basket import USUAL_GROCERIES, seed_lists
 from bounded_mandate.engine import Verdict
 from bounded_mandate.ledger import Ledger
-from bounded_mandate.merchant import USUAL_GROCERIES, MockMerchant
+from bounded_mandate.merchant import Marketplace
 from bounded_mandate.razorpay_gateway import GatewayAuthError, GatewayError, SignatureMismatch
 
 
@@ -50,7 +51,8 @@ def client(monkeypatch, tmp_path):
     gw = FakeGateway()
     monkeypatch.setattr(web, "RazorpayGateway", lambda *a, **k: gw)
     monkeypatch.setattr(web, "LEDGER", Ledger(tmp_path / "ledger.jsonl"))
-    monkeypatch.setattr(web, "MERCHANT", MockMerchant())
+    monkeypatch.setattr(web, "MARKETPLACE", Marketplace())
+    monkeypatch.setattr(web, "LISTS", seed_lists())
     c = TestClient(web.app)
     c.gateway = gw
     return c
@@ -284,3 +286,83 @@ def test_the_adversarial_flag_changes_the_agent_not_the_engine(client, monkeypat
 def test_a_model_outage_is_a_502_not_a_silent_approval(client, monkeypatch):
     monkeypatch.setattr(web, "BuyerAgent", lambda **kw: FakeAgent(blow_up=True, **kw))
     assert client.post("/api/agent", json={"text": "order the usual"}).status_code == 502
+
+
+# --- the shopping list: the user's other source of truth --------------------
+
+
+def test_the_list_comes_back_priced_against_the_allowed_merchant(client):
+    body = client.get("/api/list/usual").json()
+    assert body["merchant"] == "instamart"
+    assert [i["name"] for i in body["items"]] == list(USUAL_GROCERIES)
+    assert body["total_paise"] == 185_000
+    assert body["cap_paise"] == 200_000
+    assert body["unstocked"] == []
+    assert all(i["url"].startswith("/m/instamart/p/") for i in body["items"])
+
+
+def test_a_user_can_edit_their_list_and_it_reprices(client):
+    keep = list(USUAL_GROCERIES)[:3]
+    body = client.put("/api/list/usual", json={"item_names": keep}).json()
+    assert [i["name"] for i in body["items"]] == keep
+    assert body["total_paise"] == 53_000
+    # And it persists — this is a source of truth, not a scratch value.
+    assert client.get("/api/list/usual").json()["total_paise"] == 53_000
+
+
+def test_the_list_refuses_items_no_shop_stocks(client):
+    response = client.put("/api/list/usual", json={"item_names": ["Ferrari"]})
+    assert response.status_code == 400
+    assert client.get("/api/list/usual").json()["total_paise"] == 185_000
+
+
+def test_an_unknown_list_is_a_404_both_ways(client):
+    assert client.get("/api/list/nope").status_code == 404
+    assert client.put("/api/list/nope", json={"item_names": []}).status_code == 404
+
+
+def test_editing_the_list_never_authorises_anything(client):
+    """The list says *what*. The policy says *how much*. Editing one must not
+    touch the other, or every basket change would read as a spending change."""
+    before = sum(1 for _ in web.LEDGER.entries())
+    client.put("/api/list/usual", json={"item_names": [*USUAL_GROCERIES, "Smartwatch"]})
+    assert sum(1 for _ in web.LEDGER.entries()) == before
+    assert client.gateway.charged == []
+    # The cap is untouched, so the bigger list simply escalates when proposed.
+    assert web.POLICIES["mdt_demo"].per_txn_max_paise == 200_000
+
+
+# --- cross-merchant prices --------------------------------------------------
+
+
+def test_the_catalog_shows_every_shop_and_which_are_in_policy(client):
+    offers = client.get("/api/catalog", params={"q": "Bananas 1kg"}).json()["offers"]
+    by_merchant = {o["merchant"]: o for o in offers}
+    assert set(by_merchant) == {"instamart", "blinkit", "zepto"}
+    # The cheapest shop is deliberately the one the mandate does not cover.
+    cheapest = min(offers, key=lambda o: o["price_paise"])
+    assert cheapest["merchant"] == "blinkit"
+    assert cheapest["merchant_allowed"] is False
+    assert by_merchant["instamart"]["merchant_allowed"] is True
+    assert all(o["category_allowed"] for o in offers)
+
+
+def test_the_catalog_separates_a_disallowed_shop_from_a_disallowed_category(client):
+    """An allowed shop selling a disallowed thing must not read as a disallowed
+    shop. Naming the wrong reason is worse than naming none."""
+    (watch,) = client.get("/api/catalog", params={"q": "Smartwatch"}).json()["offers"]
+    assert watch["merchant"] == "instamart"
+    assert watch["merchant_allowed"] is True
+    assert watch["category_allowed"] is False
+
+
+def test_a_product_link_actually_resolves(client):
+    offer = client.get("/api/catalog", params={"q": "Bananas 1kg"}).json()["offers"][0]
+    page = client.get(offer["url"])
+    assert page.status_code == 200
+    assert "Bananas 1kg" in page.text
+
+
+def test_an_unstocked_product_page_is_a_404(client):
+    assert client.get("/m/instamart/p/Ferrari").status_code == 404
+    assert client.get("/m/nosuchshop/p/Bananas%201kg").status_code == 404

@@ -10,23 +10,35 @@
 		1014689A9ED39A18BCF9CD06 /* Voice.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9774A61A14E72CF37180810 /* Voice.swift */; };
 		1A4845C7B3965BFAF1B1BB05 /* Decision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 461AAC29A571034CD100B1F6 /* Decision.swift */; };
 		211C722E34BF5CD5BF6BCDE8 /* Bubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = C505FE655A597E914113A48C /* Bubble.swift */; };
+		22254A44218ED4D318B4DCD6 /* ListSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */; };
 		2DB72B2A89D6F4EDC5633695 /* Engine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06DE233A9339DC5D9DBBE6CD /* Engine.swift */; };
+		2DE0B3BCCFBF3212E0ECCD7A /* Basket.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E5DD17B91B9DC009B8D7D2C /* Basket.swift */; };
+		2EAA76FA814C1B7745FC0E41 /* MandateCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B134C0D0247EF8BD2C49D1E9 /* MandateCard.swift */; };
 		476F81A3B192453D8ECA466D /* Backdrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F3FB64D32E47048DB096422 /* Backdrop.swift */; };
+		8FD3457E71F4DB10703ABC65 /* Gallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BF062DF9C63307AEFAC7E5C /* Gallery.swift */; };
 		91914D4C0A12FBCABFFF6CB5 /* ThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 475F8843619C3FBCD0806282 /* ThreadView.swift */; };
 		9D05E8A565CBB7823A87B82A /* DecisionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 309C0A10C6372B326D0D6D3F /* DecisionCard.swift */; };
 		B3CCBE7DE4AF8D06C7DF3D2D /* Surfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FE80D8D802D5B02E2DF3C0 /* Surfaces.swift */; };
+		D1E861CE4594428BD4513065 /* ShoppingListCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B62812298D584BB58C041C20 /* ShoppingListCard.swift */; };
 		D400D29C8D8E0A2DF378D6FB /* Tokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C88F6845192AEB050232DC9 /* Tokens.swift */; };
+		E1F4E838FDCC3F49630592FB /* OffersCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EA33E9B6CFE9D623F014033 /* OffersCard.swift */; };
 		ED50CCCD43F56EF4482B05A2 /* BoundedMandateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483AA4A36F0EBA528FDE34FD /* BoundedMandateApp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		06DE233A9339DC5D9DBBE6CD /* Engine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Engine.swift; sourceTree = "<group>"; };
+		1EA33E9B6CFE9D623F014033 /* OffersCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffersCard.swift; sourceTree = "<group>"; };
 		1F3FB64D32E47048DB096422 /* Backdrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backdrop.swift; sourceTree = "<group>"; };
 		309C0A10C6372B326D0D6D3F /* DecisionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecisionCard.swift; sourceTree = "<group>"; };
 		461AAC29A571034CD100B1F6 /* Decision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Decision.swift; sourceTree = "<group>"; };
 		475F8843619C3FBCD0806282 /* ThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadView.swift; sourceTree = "<group>"; };
 		483AA4A36F0EBA528FDE34FD /* BoundedMandateApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedMandateApp.swift; sourceTree = "<group>"; };
+		5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListSheet.swift; sourceTree = "<group>"; };
 		6C88F6845192AEB050232DC9 /* Tokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tokens.swift; sourceTree = "<group>"; };
+		8BF062DF9C63307AEFAC7E5C /* Gallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gallery.swift; sourceTree = "<group>"; };
+		9E5DD17B91B9DC009B8D7D2C /* Basket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Basket.swift; sourceTree = "<group>"; };
+		B134C0D0247EF8BD2C49D1E9 /* MandateCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MandateCard.swift; sourceTree = "<group>"; };
+		B62812298D584BB58C041C20 /* ShoppingListCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShoppingListCard.swift; sourceTree = "<group>"; };
 		BD126AE709CB4010EFDE7B52 /* BoundedMandate.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BoundedMandate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C505FE655A597E914113A48C /* Bubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bubble.swift; sourceTree = "<group>"; };
 		E2FE80D8D802D5B02E2DF3C0 /* Surfaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Surfaces.swift; sourceTree = "<group>"; };
@@ -54,6 +66,11 @@
 				1F3FB64D32E47048DB096422 /* Backdrop.swift */,
 				C505FE655A597E914113A48C /* Bubble.swift */,
 				309C0A10C6372B326D0D6D3F /* DecisionCard.swift */,
+				8BF062DF9C63307AEFAC7E5C /* Gallery.swift */,
+				5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */,
+				B134C0D0247EF8BD2C49D1E9 /* MandateCard.swift */,
+				1EA33E9B6CFE9D623F014033 /* OffersCard.swift */,
+				B62812298D584BB58C041C20 /* ShoppingListCard.swift */,
 				E2FE80D8D802D5B02E2DF3C0 /* Surfaces.swift */,
 				475F8843619C3FBCD0806282 /* ThreadView.swift */,
 			);
@@ -63,6 +80,7 @@
 		7FD92369C2054F4909789245 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				9E5DD17B91B9DC009B8D7D2C /* Basket.swift */,
 				461AAC29A571034CD100B1F6 /* Decision.swift */,
 			);
 			path = Models;
@@ -160,11 +178,17 @@
 			buildActionMask = 2147483647;
 			files = (
 				476F81A3B192453D8ECA466D /* Backdrop.swift in Sources */,
+				2DE0B3BCCFBF3212E0ECCD7A /* Basket.swift in Sources */,
 				ED50CCCD43F56EF4482B05A2 /* BoundedMandateApp.swift in Sources */,
 				211C722E34BF5CD5BF6BCDE8 /* Bubble.swift in Sources */,
 				1A4845C7B3965BFAF1B1BB05 /* Decision.swift in Sources */,
 				9D05E8A565CBB7823A87B82A /* DecisionCard.swift in Sources */,
 				2DB72B2A89D6F4EDC5633695 /* Engine.swift in Sources */,
+				8FD3457E71F4DB10703ABC65 /* Gallery.swift in Sources */,
+				22254A44218ED4D318B4DCD6 /* ListSheet.swift in Sources */,
+				2EAA76FA814C1B7745FC0E41 /* MandateCard.swift in Sources */,
+				E1F4E838FDCC3F49630592FB /* OffersCard.swift in Sources */,
+				D1E861CE4594428BD4513065 /* ShoppingListCard.swift in Sources */,
 				B3CCBE7DE4AF8D06C7DF3D2D /* Surfaces.swift in Sources */,
 				91914D4C0A12FBCABFFF6CB5 /* ThreadView.swift in Sources */,
 				D400D29C8D8E0A2DF378D6FB /* Tokens.swift in Sources */,

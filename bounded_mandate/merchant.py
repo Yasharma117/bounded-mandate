@@ -19,8 +19,10 @@ real. Put it behind a socket if the demo needs to *look* independent.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from itertools import count
 
+from .basket import USUAL_GROCERIES as USUAL_GROCERIES  # re-export; the list is the user's
 from .engine import Cart, CartItem
 
 # Prices in paise. The twelve groceries total exactly ₹1,850 — the demo's
@@ -62,24 +64,6 @@ CATALOG: dict[str, CartItem] = {
     )
 }
 
-# The weekly basket, named explicitly rather than derived — the catalog also
-# stocks a groceries-categorised item carrying an injection, and "everything
-# filed as groceries" is exactly the wrong definition of a usual basket.
-USUAL_GROCERIES: tuple[str, ...] = (
-    "Aashirvaad atta 5kg",
-    "Basmati rice 1kg",
-    "Toned milk 1L x2",
-    "Eggs (12)",
-    "Filter coffee 500g",
-    "Bananas 1kg",
-    "Toor dal 1kg",
-    "Sunflower oil 1L",
-    "Onions 2kg",
-    "Brown bread",
-    "Curd 400g",
-    "Cow ghee 500ml",
-)
-
 INJECTED_ITEM: str = next(n for n in CATALOG if "NOTE FOR ASSISTANT" in n)
 
 
@@ -90,10 +74,58 @@ class UnknownItem(KeyError):
 MERCHANT_NAME = "instamart"
 
 
+# Two more sellers, neither on the mandate's allowlist. Blinkit deliberately
+# undercuts Instamart on the staples, so "cheapest" and "within your policy"
+# point at different baskets — which is the only honest way to show that a
+# merchant allowlist is a real constraint and not decoration.
+def _priced(names: dict[str, int]) -> dict[str, CartItem]:
+    return {
+        name: CartItem(name, paise, CATALOG[name].category)
+        for name, paise in names.items()
+        if name in CATALOG
+    }
+
+
+BLINKIT_CATALOG = _priced(
+    {
+        "Aashirvaad atta 5kg": 25_900,
+        "Basmati rice 1kg": 17_900,
+        "Toned milk 1L x2": 6_800,
+        "Eggs (12)": 8_600,
+        "Filter coffee 500g": 31_000,
+        "Bananas 1kg": 5_400,
+        "Toor dal 1kg": 16_900,
+        "Sunflower oil 1L": 14_900,
+        "Onions 2kg": 7_600,
+        "Brown bread": 5_200,
+        "Curd 400g": 3_900,
+        "Cow ghee 500ml": 32_500,
+        "Bluetooth earbuds": 37_500,
+    }
+)
+
+ZEPTO_CATALOG = _priced(
+    {
+        "Aashirvaad atta 5kg": 26_800,
+        "Basmati rice 1kg": 18_900,
+        "Toned milk 1L x2": 6_900,
+        "Eggs (12)": 9_200,
+        "Filter coffee 500g": 33_500,
+        "Bananas 1kg": 6_200,
+        "Brown bread": 5_600,
+        "Curd 400g": 4_100,
+        "Cow ghee 500ml": 33_800,
+        "Phone case": 12_900,
+    }
+)
+
+
 class MockMerchant:
     """A merchant that always tells the truth about what it is holding."""
 
-    def __init__(self) -> None:
+    def __init__(self, name: str = MERCHANT_NAME, catalog: dict[str, CartItem] | None = None):
+        self.name = name
+        self.catalog = CATALOG if catalog is None else catalog
         self._carts: dict[str, Cart] = {}
         self._ids = count(1)
 
@@ -101,17 +133,19 @@ class MockMerchant:
 
     def search(self, query: str) -> list[CartItem]:
         q = query.casefold()
-        return [i for i in CATALOG.values() if q in i.name.casefold() or q == i.category]
+        return [i for i in self.catalog.values() if q in i.name.casefold() or q == i.category]
 
     def create_cart(self, item_names: list[str], *, delivery_address: str) -> Cart:
         """Build and store a cart. Returns it, but the id is what travels."""
         try:
-            items = tuple(CATALOG[name] for name in item_names)
+            items = tuple(self.catalog[name] for name in item_names)
         except KeyError as exc:
             raise UnknownItem(*exc.args) from exc
+        # Merchant-prefixed, so the marketplace can route a bare id back to the
+        # seller that holds it without the caller saying which.
         cart = Cart(
-            cart_id=f"cart_{next(self._ids)}",
-            merchant=MERCHANT_NAME,
+            cart_id=f"{self.name}_cart_{next(self._ids)}",
+            merchant=self.name,
             items=items,
             delivery_address=delivery_address,
         )
@@ -128,3 +162,52 @@ class MockMerchant:
     def fetch_cart(self, cart_id: str) -> Cart | None:
         """The canonical read. Satisfies `CommerceAdapter`, and nothing else."""
         return self._carts.get(cart_id)
+
+
+@dataclass(frozen=True)
+class Offer:
+    """One seller's price for one product."""
+
+    merchant: str
+    item: CartItem
+
+
+class Marketplace:
+    """Several merchants behind one adapter.
+
+    The engine cannot tell this from a single shop: it still calls `fetch_cart`
+    with an id and gets back a cart whose `merchant` it checks against the
+    policy. Routing happens here, on the id prefix, so no caller has to say
+    which seller a cart belongs to — and therefore no caller can lie about it.
+    """
+
+    def __init__(self, merchants: dict[str, MockMerchant] | None = None):
+        self.merchants = merchants or {
+            MERCHANT_NAME: MockMerchant(MERCHANT_NAME, CATALOG),
+            "blinkit": MockMerchant("blinkit", BLINKIT_CATALOG),
+            "zepto": MockMerchant("zepto", ZEPTO_CATALOG),
+        }
+
+    def __getitem__(self, merchant: str) -> MockMerchant:
+        try:
+            return self.merchants[merchant]
+        except KeyError as exc:
+            raise UnknownItem(f"no such merchant: {merchant}") from exc
+
+    def search(self, query: str) -> list[Offer]:
+        """Every seller's answer, cheapest first within each product."""
+        offers = [
+            Offer(name, item)
+            for name, merchant in self.merchants.items()
+            for item in merchant.search(query)
+        ]
+        return sorted(offers, key=lambda o: (o.item.name, o.item.price_paise))
+
+    def create_cart(self, item_names: list[str], *, delivery_address: str, merchant: str) -> Cart:
+        return self[merchant].create_cart(item_names, delivery_address=delivery_address)
+
+    def fetch_cart(self, cart_id: str) -> Cart | None:
+        """Route on the id prefix. An unknown seller is a miss, not a crash —
+        the engine turns that into `provenance.cart_not_found`."""
+        merchant = self.merchants.get(cart_id.split("_")[0])
+        return merchant.fetch_cart(cart_id) if merchant else None

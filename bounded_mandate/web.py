@@ -17,17 +17,21 @@ build-time environment variable.
 from __future__ import annotations
 
 import os
+from dataclasses import replace
+from html import escape
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .agent import ADVERSARIAL_SYSTEM, BuyerAgent
+from .basket import ShoppingList, seed_lists
 from .compiler import compile_mandate
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import Ledger
-from .merchant import USUAL_GROCERIES, MockMerchant
+from .merchant import Marketplace, UnknownItem
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
 from .voice import VoiceUnavailable, speak, transcribe
 
@@ -41,30 +45,10 @@ HOME = "12 Nandidurga Rd, Bengaluru"
 # the demo has one mandate and one merchant, so a module-level store is honest
 # about what it is rather than pretending to be a database.
 LEDGER = Ledger(os.environ.get("BM_LEDGER", "ledger.jsonl"))
-MERCHANT = MockMerchant()
-# Demo baskets. Temporary scaffolding: the buyer agent will build carts itself,
-# and these go with the buttons that call them.
-SCENARIOS: dict[str, dict] = {
-    "honest": {
-        "label": "The usual basket — ₹1,850",
-        "note": "12 groceries, reported truthfully",
-        "items": list(USUAL_GROCERIES),
-        "claimed_total_paise": 185_000,
-    },
-    "overcap": {
-        "label": "Basket with earbuds and a phone case — ₹2,400",
-        "note": "over cap, and two items off-scope",
-        "items": [*USUAL_GROCERIES, "Bluetooth earbuds", "Phone case"],
-        "claimed_total_paise": 240_000,
-    },
-    "lying": {
-        "label": "Claim ₹1,850, hide a ₹15,000 smartwatch",
-        "note": "the agent lies about its own cart",
-        "items": [*USUAL_GROCERIES, "Smartwatch"],
-        "claimed_total_paise": 185_000,
-    },
-}
-
+MARKETPLACE = Marketplace()
+# The user's lists. Owned by the user, read by the agent, and there is no route
+# and no agent tool that lets the agent write one — see `basket`.
+LISTS: dict[str, ShoppingList] = seed_lists()
 POLICIES: dict[str, Policy] = {
     "mdt_demo": Policy(
         mandate_id="mdt_demo",
@@ -151,13 +135,6 @@ def order_page() -> str:
     return (STATIC / "order.html").read_text(encoding="utf-8")
 
 
-@app.get("/api/scenarios")
-def scenarios() -> dict:
-    """The baskets the demo buttons propose. Server-owned, so the page holds no
-    copy of the catalog — and this whole endpoint dies when the agent lands."""
-    return SCENARIOS
-
-
 @app.get("/api/ledger")
 def ledger_entries() -> dict:
     """The audit trail, and whether the chain still verifies."""
@@ -240,20 +217,21 @@ class ProposalRequest(BaseModel):
     )
     claimed_total_paise: int = Field(gt=0, description="What the agent says the cart comes to")
     mandate_id: str = "mdt_demo"
+    merchant: str = "instamart"
 
 
 @app.post("/api/proposal")
 def submit_proposal(body: ProposalRequest) -> dict:
     """A cart, proposed directly. The engine decides; only an ALLOW reaches the rail."""
     try:
-        cart = MERCHANT.create_cart(body.items, delivery_address=HOME)
-    except KeyError as exc:
+        cart = MARKETPLACE.create_cart(body.items, delivery_address=HOME, merchant=body.merchant)
+    except UnknownItem as exc:
         raise HTTPException(400, f"not stocked: {exc.args[0]}") from exc
 
     decision = decide(
         Proposal(body.mandate_id, cart.cart_id, body.claimed_total_paise),
         policies=POLICIES,
-        adapter=MERCHANT,
+        adapter=MARKETPLACE,
         ledger=LEDGER,
     )
     return _rendered(
@@ -278,7 +256,8 @@ def run_agent(body: Instruction) -> dict:
     — never what the engine permits.
     """
     agent = BuyerAgent(
-        merchant=MERCHANT,
+        marketplace=MARKETPLACE,
+        shopping_list=LISTS.get("usual"),
         policies=POLICIES,
         ledger=LEDGER,
         mandate_id="mdt_demo",
@@ -365,3 +344,114 @@ def speak_text(body: Utterance) -> Response:
         return Response(speak(body.text), media_type="audio/mpeg")
     except VoiceUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
+
+
+def _offer_rows(query: str) -> list[dict]:
+    """Every seller's price for a product, with the policy's answer attached.
+
+    `in_policy` is computed here rather than in the app, because whether a
+    merchant is allowed is the engine's judgement and the client should not be
+    reimplementing it — it only renders what it is told.
+    """
+    policy = POLICIES["mdt_demo"]
+    return [
+        {
+            "merchant": offer.merchant,
+            "name": offer.item.name,
+            "price_paise": offer.item.price_paise,
+            "category": offer.item.category,
+            "url": f"/m/{offer.merchant}/p/{quote(offer.item.name)}",
+            # Two separate answers, not one. A shop can be allowed while the
+            # thing it sells is not, and telling the user "not on your list"
+            # when the shop *is* on their list names the wrong reason.
+            "merchant_allowed": offer.merchant in policy.merchants,
+            "category_allowed": offer.item.category in policy.categories,
+        }
+        for offer in MARKETPLACE.search(query)
+    ]
+
+
+@app.get("/api/catalog")
+def catalog(q: str = "") -> dict:
+    """Cross-merchant search. The same product from three sellers at three
+    prices, and — separately — whether the shop and the category are covered."""
+    return {"offers": _offer_rows(q)}
+
+
+def _list_rows(shopping: ShoppingList) -> dict:
+    """The list, priced at the merchant the mandate allows."""
+    policy = POLICIES["mdt_demo"]
+    seller = next(iter(policy.merchants))
+    catalog = MARKETPLACE[seller].catalog
+    items = [
+        {
+            "name": name,
+            "price_paise": catalog[name].price_paise if name in catalog else None,
+            "category": catalog[name].category if name in catalog else "",
+            "url": f"/m/{seller}/p/{quote(name)}",
+        }
+        for name in shopping.item_names
+    ]
+    priced = [i["price_paise"] for i in items if i["price_paise"] is not None]
+    return {
+        "list_id": shopping.list_id,
+        "name": shopping.name,
+        "merchant": seller,
+        "items": items,
+        "total_paise": sum(priced),
+        "cap_paise": policy.per_txn_max_paise,
+        "unstocked": [i["name"] for i in items if i["price_paise"] is None],
+    }
+
+
+@app.get("/api/list/{list_id}")
+def read_list(list_id: str) -> dict:
+    shopping = LISTS.get(list_id)
+    if shopping is None:
+        raise HTTPException(404, "no such list")
+    return _list_rows(shopping)
+
+
+class ListEdit(BaseModel):
+    item_names: list[str] = Field(description="The list, in the order the user wants it")
+
+
+@app.put("/api/list/{list_id}")
+def write_list(list_id: str, body: ListEdit) -> dict:
+    """Replace the list. **A user action, and only a user action** — the buyer
+    agent holds no tool that reaches this route, because an agent that could
+    redefine "my usual groceries" could then order the new definition entirely
+    within policy."""
+    shopping = LISTS.get(list_id)
+    if shopping is None:
+        raise HTTPException(404, "no such list")
+    unknown = [n for n in body.item_names if n not in MARKETPLACE["instamart"].catalog]
+    if unknown:
+        raise HTTPException(400, f"not stocked: {', '.join(unknown)}")
+    LISTS[list_id] = replace(shopping, item_names=tuple(body.item_names))
+    return _list_rows(LISTS[list_id])
+
+
+@app.get("/m/{merchant}/p/{name}", response_class=HTMLResponse)
+def product_page(merchant: str, name: str) -> str:
+    """A real product page, so a product link resolves instead of 404ing.
+
+    The injected catalog item gets one too, which is the point: the planted
+    instruction is sitting in a product title that the agent reads and the
+    shopper never looks at twice.
+    """
+    try:
+        item = MARKETPLACE[merchant].catalog[name]
+    except (UnknownItem, KeyError) as exc:
+        raise HTTPException(404, "not stocked") from exc
+    return (
+        f"<!doctype html><meta charset=utf-8>"
+        f"<title>{escape(item.name)} · {escape(merchant)}</title>"
+        f"<body style='font:16px/1.5 ui-sans-serif,system-ui;max-width:34rem;"
+        f"margin:3rem auto;padding:0 1rem'>"
+        f"<p style='color:#8E96C8;text-transform:uppercase;letter-spacing:.08em;"
+        f"font-size:.75rem'>{escape(merchant)}</p>"
+        f"<h1 style='font-size:1.25rem'>{escape(item.name)}</h1>"
+        f"<p style='font-size:1.5rem;font-weight:600'>₹{item.price_paise / 100:,.0f}</p>"
+        f"<p style='color:#666'>{escape(item.category or 'uncategorised')}</p>"
+    )

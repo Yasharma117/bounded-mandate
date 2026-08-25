@@ -86,6 +86,8 @@ struct ThreadView: View {
     @State private var draft = ""
     @State private var voice = VoiceRecorder()
     @FocusState private var writing: Bool
+    // DEV: -BMOpenList YES opens straight to the list.
+    @State private var showingList = UserDefaults.standard.bool(forKey: "BMOpenList")
 
     var body: some View {
         NavigationStack {
@@ -114,6 +116,21 @@ struct ThreadView: View {
             }
             .background(Backdrop())
             .navigationTitle("Bounded Mandate")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingList = true } label: {
+                        Image(systemName: "list.bullet.rectangle")
+                    }
+                    .accessibilityLabel("Shopping list")
+                }
+                // DEV ONLY — goes with Gallery.swift before submission.
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink { Gallery() } label: {
+                        Image(systemName: "rectangle.stack")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingList) { ListSheet() }
             .safeAreaBar(edge: .bottom) { composer }
         }
     }

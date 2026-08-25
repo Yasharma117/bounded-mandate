@@ -30,6 +30,27 @@ enum Engine {
         try await post("/api/agent", body: ["text": text, "adversarial": adversarial])
     }
 
+    /// The user's list. Read freely; written only by the user.
+    static func readList(_ listID: String = "usual") async throws -> ShoppingList {
+        try await send("/api/list/\(listID)", method: "GET")
+    }
+
+    /// Replace the list. There is no agent path to this call — see `basket.py`.
+    static func writeList(_ listID: String = "usual", items: [String]) async throws -> ShoppingList {
+        try await send("/api/list/\(listID)", method: "PUT", body: ["item_names": items])
+    }
+
+    /// Every shop's price for a product, and separately whether the shop and
+    /// the category are covered.
+    static func catalog(_ query: String) async throws -> [Offer] {
+        struct Wrapper: Decodable { let offers: [Offer] }
+        let wrapper: Wrapper = try await send(
+            "/api/catalog?q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")",
+            method: "GET"
+        )
+        return wrapper.offers
+    }
+
     private static func post<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = "POST"
@@ -37,6 +58,28 @@ enum Engine {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 60
 
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw Failure("No response") }
+        guard (200..<300).contains(http.statusCode) else {
+            let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"]
+            throw Failure(detail as? String ?? "Engine returned \(http.statusCode)")
+        }
+        return try decoder.decode(T.self, from: data)
+    }
+
+    private static func send<T: Decodable>(
+        _ path: String, method: String, body: [String: Any]? = nil
+    ) async throws -> T {
+        guard let url = URL(string: baseURL.absoluteString + path) else {
+            throw Failure("Bad path: \(path)")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = 30
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw Failure("No response") }
         guard (200..<300).contains(http.statusCode) else {
