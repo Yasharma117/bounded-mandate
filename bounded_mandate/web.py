@@ -33,7 +33,7 @@ from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import Ledger
 from .merchant import Marketplace, UnknownItem, UnknownMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
-from .voice import VoiceUnavailable, speak, transcribe
+from .voice import SPEAKERS, TTS_PROVIDER, VoiceUnavailable, speak, transcribe
 
 app = FastAPI(title="Bounded Mandate", docs_url="/api/docs")
 
@@ -359,13 +359,36 @@ async def transcribe_speech(request: Request) -> dict:
         raise HTTPException(503, str(exc)) from exc
 
 
+class SpeakRequest(BaseModel):
+    text: str = Field(min_length=1)
+    provider: str | None = Field(
+        default=None,
+        description="`elevenlabs` or `rumik`. Omit for the configured default.",
+    )
+
+
 @app.post("/api/voice/speak")
-def speak_text(body: Utterance) -> Response:
-    """Text in, mp3 out. The app plays it; the key stays here."""
+def speak_text(body: SpeakRequest) -> Response:
+    """Text in, audio out. The app plays it; the keys stay here.
+
+    The two services return different formats, so the content type is whatever
+    the provider actually produced rather than an assumption baked into the app.
+    """
     try:
-        return Response(speak(body.text), media_type="audio/mpeg")
+        spoken = speak(body.text, provider=body.provider)
     except VoiceUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
+    return Response(
+        spoken.audio,
+        media_type=spoken.media_type,
+        headers={"X-Voice-Provider": spoken.provider},
+    )
+
+
+@app.get("/api/voice/providers")
+def voice_providers() -> dict:
+    """Which services can speak, and which one is speaking by default."""
+    return {"providers": sorted(SPEAKERS), "default": TTS_PROVIDER}
 
 
 def _offer_rows(query: str) -> list[dict]:

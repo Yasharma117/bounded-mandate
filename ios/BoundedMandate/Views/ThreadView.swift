@@ -73,7 +73,9 @@ final class Thread {
             if let decision = result.decision {
                 messages.append(.ruled(id: "d-\(turn)", decision: decision))
             }
-            await Voice.say(spoken)
+            // Deliberately silent. Typing is a quiet interaction, and
+            // answering it aloud is the app talking over you — speech belongs
+            // to voice mode, where a conversation is what you asked for.
         } catch {
             messages.append(.said(id: "e-\(turn)", from: .agent, text: error.localizedDescription))
         }
@@ -84,10 +86,11 @@ struct ThreadView: View {
     @Environment(\.theme) private var theme
     @State private var thread = Thread()
     @State private var draft = ""
-    @State private var voice = VoiceRecorder()
     @FocusState private var writing: Bool
     // DEV: -BMOpenList YES opens straight to the list.
     @State private var showingList = UserDefaults.standard.bool(forKey: "BMOpenList")
+    // DEV: -BMOpenVoice YES opens straight into voice mode.
+    @State private var showingVoice = UserDefaults.standard.bool(forKey: "BMOpenVoice")
 
     var body: some View {
         NavigationStack {
@@ -131,78 +134,76 @@ struct ThreadView: View {
                 }
             }
             .sheet(isPresented: $showingList) { ListSheet() }
+            .fullScreenCover(isPresented: $showingVoice) { VoiceAgentView() }
             .safeAreaBar(edge: .bottom) { composer }
         }
     }
 
-    /// Pinned to the bottom. Speaking and typing are the same input, and the
-    /// keyboard is handled by the system rather than by hand.
+    /// Pinned to the bottom. Typing and talking are separate doors now: the
+    /// field is for typing, and the button beside it opens a conversation.
     private var composer: some View {
         VStack(spacing: 10) {
-                if let problem = voice.problem {
-                    Text(problem)
-                        .font(.system(size: 12))
-                        .foregroundStyle(theme.negative)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 6)
-                }
-
-                // Their own container, so the chips blend into each other as
-                // they scroll without also swallowing the input bar below.
-                GlassEffectContainer(spacing: 12) {
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 8) {
-                            ForEach(Opener.all) { opener in
-                                Button(opener.label) {
-                                    Task {
-                                        await thread.send(
-                                            opener.text, adversarial: opener.adversarial)
-                                    }
+            // Their own container, so the chips blend into each other as they
+            // scroll without also swallowing the input bar below.
+            GlassEffectContainer(spacing: 12) {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(Opener.all) { opener in
+                            Button(opener.label) {
+                                Task {
+                                    await thread.send(
+                                        opener.text, adversarial: opener.adversarial)
                                 }
-                                .buttonStyle(.glass)
-                                .font(.system(size: 13))
-                                .tint(theme.textNormal)
                             }
+                            .buttonStyle(.glass)
+                            .font(.system(size: 13))
+                            .tint(theme.textNormal)
                         }
-                        .padding(.horizontal, 16)
                     }
-                    .scrollIndicators(.hidden)
+                    .padding(.horizontal, 16)
                 }
+                .scrollIndicators(.hidden)
+            }
 
+            HStack(spacing: 10) {
                 HStack(spacing: 10) {
-                    TextField(
-                        voice.listening ? "Listening…" : "Ask Bounded Mandate anything…",
-                        text: $draft
-                    )
-                    .focused($writing)
-                    .submitLabel(.send)
-                    .onSubmit(submit)
-                    .disabled(thread.busy || voice.listening)
+                    TextField("Ask Bounded Mandate anything…", text: $draft)
+                        .focused($writing)
+                        .submitLabel(.send)
+                        .onSubmit(submit)
+                        .disabled(thread.busy)
 
-                    if draft.trimmingCharacters(in: .whitespaces).isEmpty {
-                        Button(action: toggleMic) {
-                            Image(systemName: voice.listening ? "stop.circle.fill" : "mic.fill")
-                                .font(.system(size: voice.listening ? 22 : 17))
-                                .foregroundStyle(voice.listening ? theme.negative : theme.textMuted)
-                                // The glyph is 17pt; the target must not be.
-                                .frame(width: 44, height: 44)
-                                .contentShape(.rect)
-                        }
-                    } else {
+                    if !draft.trimmingCharacters(in: .whitespaces).isEmpty {
                         Button(action: submit) {
                             Image(systemName: "arrow.up.circle.fill")
                                 .font(.system(size: 22))
                                 .foregroundStyle(theme.primary)
-                                .frame(width: 44, height: 44)
+                                .frame(width: 40, height: 40)
                                 .contentShape(.rect)
                         }
                     }
                 }
                 .padding(.leading, 18)
-                .padding(.trailing, 6)
-                .padding(.vertical, 4)
+                .padding(.trailing, draft.trimmingCharacters(in: .whitespaces).isEmpty ? 18 : 6)
+                .padding(.vertical, 6)
+                .frame(minHeight: 52)
                 .glassEffect(.regular.interactive(), in: .capsule)
-                .padding(.horizontal, 16)
+
+                // Out of the field and beside it, because it does not send this
+                // message — it opens a different way of talking altogether, and
+                // a control sitting inside the text field would promise
+                // otherwise.
+                Button { showingVoice = true } label: {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(theme.primary)
+                        .frame(width: 52, height: 52)
+                        .contentShape(.circle)
+                }
+                .glassEffect(.regular.interactive(), in: .circle)
+                .accessibilityLabel("Talk to the agent")
+            }
+            .padding(.horizontal, 16)
         }
         .padding(.bottom, 8)
     }
@@ -213,14 +214,4 @@ struct ThreadView: View {
         Task { await thread.send(text) }
     }
 
-    private func toggleMic() {
-        Task {
-            // Straight through: speaking is how this app is meant to be used,
-            // and a confirm step before every sentence is the friction it
-            // exists to remove.
-            if let heard = await voice.toggle(), !heard.isEmpty {
-                await thread.send(heard)
-            }
-        }
-    }
 }

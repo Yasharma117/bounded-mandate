@@ -71,7 +71,10 @@ def test_a_provider_error_surfaces_as_unavailable(key, monkeypatch):
 
 
 def test_speak_targets_the_configured_voice_and_returns_audio(key, calls):
-    assert voice.speak("Nothing was charged.") == b"ID3mp3"
+    spoken = voice.speak("Nothing was charged.", provider="elevenlabs")
+    assert spoken.audio == b"ID3mp3"
+    assert spoken.media_type == "audio/mpeg"
+    assert spoken.provider == "elevenlabs"
     (call,) = calls
     assert call["url"].endswith(f"/text-to-speech/{voice.VOICE_ID}")
     assert call["json"]["text"] == "Nothing was charged."
@@ -79,7 +82,7 @@ def test_speak_targets_the_configured_voice_and_returns_audio(key, calls):
 
 
 def test_speak_truncates_rather_than_billing_for_a_runaway_string(key, calls):
-    voice.speak("a" * (voice.MAX_SPEAK_CHARS + 500))
+    voice.speak("a" * (voice.MAX_SPEAK_CHARS + 500), provider="elevenlabs")
     assert len(calls[0]["json"]["text"]) == voice.MAX_SPEAK_CHARS
 
 
@@ -87,6 +90,61 @@ def test_speak_refuses_whitespace(key, calls):
     with pytest.raises(voice.VoiceUnavailable, match="nothing to say"):
         voice.speak("   ")
     assert calls == []
+
+
+# --- two services, one seam -------------------------------------------------
+
+
+@pytest.fixture
+def rumik_key(monkeypatch):
+    monkeypatch.setenv("RUMIK_API_KEY", "rk_live_test")
+
+
+def test_rumik_speaks_wav_and_says_so(rumik_key, calls, monkeypatch):
+    monkeypatch.setattr(voice, "RUMIK_MODEL", "mulberry")
+    spoken = voice.speak("Nothing was charged.", provider="rumik")
+    assert spoken.media_type == "audio/wav"
+    assert spoken.provider == "rumik"
+    (call,) = calls
+    assert call["url"].endswith("/tts")
+    assert call["headers"]["Authorization"] == "Bearer rk_live_test"
+    assert call["json"]["model"] == "mulberry"
+    # mulberry is steered by a description; muga takes neither.
+    assert call["json"]["description"]
+    assert call["json"]["speaker"] == voice.RUMIK_SPEAKER
+
+
+def test_muga_is_not_sent_mulberry_only_fields(rumik_key, calls, monkeypatch):
+    monkeypatch.setattr(voice, "RUMIK_MODEL", "muga")
+    voice.speak("Nothing was charged.", provider="rumik")
+    assert "description" not in calls[0]["json"]
+    assert "speaker" not in calls[0]["json"]
+
+
+def test_each_service_needs_only_its_own_key(monkeypatch, calls):
+    """Rumik must not require an ElevenLabs key, or the seam is not a seam."""
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    monkeypatch.setenv("RUMIK_API_KEY", "rk_live_test")
+    assert voice.speak("hello", provider="rumik").provider == "rumik"
+
+    monkeypatch.delenv("RUMIK_API_KEY", raising=False)
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "sk_test_key")
+    assert voice.speak("hello", provider="elevenlabs").provider == "elevenlabs"
+
+
+def test_an_unknown_provider_names_the_ones_that_exist(key, calls):
+    with pytest.raises(voice.VoiceUnavailable, match="no such voice provider"):
+        voice.speak("hello", provider="murf")
+    assert calls == []
+
+
+def test_hearing_is_elevenlabs_whichever_service_speaks(rumik_key, monkeypatch, calls):
+    """Rumik does not transcribe. Swapping the speaker must not silently swap
+    the listener to something that cannot listen."""
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    monkeypatch.setattr(voice, "TTS_PROVIDER", "rumik")
+    with pytest.raises(voice.VoiceUnavailable, match="ELEVENLABS_API_KEY"):
+        voice.transcribe(b"audio")
 
 
 # --- the HTTP surface ------------------------------------------------------
@@ -134,11 +192,39 @@ def test_a_key_id_pasted_instead_of_a_key_says_so(monkeypatch, calls):
     from ElevenLabs that reads like a wiring fault; this names the real fix."""
     monkeypatch.setenv("ELEVENLABS_API_KEY", "caad9511677f0480dc3fb146417bd0b2")
     with pytest.raises(voice.VoiceUnavailable, match="key ID, not a key"):
-        voice.speak("hello")
+        voice.speak("hello", provider="elevenlabs")
     assert calls == [], "refused before it cost a request"
 
 
 def test_surrounding_whitespace_in_the_key_is_forgiven(monkeypatch, calls):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "  sk_realkey  ")
-    voice.speak("hello")
+    voice.speak("hello", provider="elevenlabs")
     assert calls[0]["headers"]["xi-api-key"] == "sk_realkey"
+
+
+def test_the_speak_route_reports_which_service_spoke(client, key, calls):
+    """The app has to know what it was handed: one service returns mp3 and the
+    other wav, and a player told the wrong thing plays silence."""
+    response = client.post("/api/voice/speak", json={"text": "hello"})
+    assert response.status_code == 200
+    assert response.headers["x-voice-provider"] == "elevenlabs"
+    assert response.headers["content-type"] == "audio/mpeg"
+
+
+def test_the_route_can_be_asked_for_either_service(client, monkeypatch, calls):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "sk_test_key")
+    monkeypatch.setenv("RUMIK_API_KEY", "rk_live_test")
+    rumik = client.post("/api/voice/speak", json={"text": "hello", "provider": "rumik"})
+    assert rumik.headers["x-voice-provider"] == "rumik"
+    assert rumik.headers["content-type"] == "audio/wav"
+
+
+def test_an_unknown_provider_over_http_is_a_503_not_a_crash(client, key, calls):
+    response = client.post("/api/voice/speak", json={"text": "x", "provider": "murf"})
+    assert response.status_code == 503
+
+
+def test_the_providers_route_lists_what_can_speak(client):
+    body = client.get("/api/voice/providers").json()
+    assert set(body["providers"]) == {"elevenlabs", "rumik"}
+    assert body["default"] in body["providers"]

@@ -8,31 +8,42 @@ import SwiftUI
 /// material rather than as outlines.
 ///
 /// `MeshGradient` is a real shader, shipped by the platform — no WebGL host and
-/// no dependency. It drifts rather than sitting still, because a static field
-/// behind moving glass gives the refraction nothing to catch; the motion is far
-/// too slow to compete with a money figure for attention.
+/// no dependency. In the thread it drifts slowly and stays out of the way. In
+/// voice mode it is driven by `intensity`, which is where it earns its keep:
+/// the field brightening as you speak is how a screen with no words on it yet
+/// still says *I am listening*.
 struct Backdrop: View {
     @Environment(\.theme) private var theme
 
+    /// 0 at rest, 1 at full voice. Drives brightness and how far the mesh moves.
+    var intensity: Double = 0
+    /// Voice mode leans on colour much harder than a page background should.
+    var vivid: Bool = false
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 20)) { timeline in
+        TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
             let seconds = timeline.date.timeIntervalSinceReferenceDate
             MeshGradient(
                 width: 3,
                 height: 3,
-                points: Self.points(at: seconds),
+                points: Self.points(at: seconds, intensity: intensity),
                 colors: colors
             )
         }
         .background(theme.bgSubtle)
         .ignoresSafeArea()
+        .animation(.easeOut(duration: 0.18), value: intensity)
     }
 
-    // Broken out and explicitly typed: the compiler cannot check these
-    // literals inline in reasonable time.
-    private static func points(at seconds: TimeInterval) -> [SIMD2<Float>] {
-        let drift = Float(sin(seconds / 9)) * 0.06
-        let sway = Float(cos(seconds / 13)) * 0.05
+    // Broken out and explicitly typed: the compiler cannot check these literals
+    // inline in reasonable time.
+    private static func points(at seconds: TimeInterval, intensity: Double) -> [SIMD2<Float>] {
+        // Louder means faster and wider, so the motion reads as a response
+        // rather than as an idle animation that happens to be running.
+        let energy = Float(0.06 + intensity * 0.16)
+        let rate = 1 + intensity * 2.2
+        let drift = Float(sin(seconds * rate / 9)) * energy
+        let sway = Float(cos(seconds * rate / 13)) * energy * 0.85
         return [
             SIMD2(0, 0), SIMD2(0.5 + sway, 0), SIMD2(1, 0),
             SIMD2(0, 0.5 - drift), SIMD2(0.5 + drift, 0.5 + sway), SIMD2(1, 0.5 + drift),
@@ -41,12 +52,14 @@ struct Backdrop: View {
     }
 
     private var colors: [Color] {
+        let lift = vivid ? 0.34 + intensity * 0.42 : 0.0
         let blue = theme.primary
         let page = theme.bgSubtle
+        func wash(_ base: Double) -> Color { blue.opacity(min(base + lift, 0.92)) }
         return [
-            blue.opacity(0.34), blue.opacity(0.16), page,
-            blue.opacity(0.12), page, blue.opacity(0.10),
-            page, blue.opacity(0.14), blue.opacity(0.22),
+            wash(0.34), wash(0.16), vivid ? wash(0.08) : page,
+            wash(0.12), vivid ? wash(0.06) : page, wash(0.10),
+            vivid ? wash(0.09) : page, wash(0.14), wash(0.22),
         ]
     }
 }

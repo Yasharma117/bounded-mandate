@@ -243,3 +243,34 @@ struct CopyTests {
         }
     }
 }
+
+/// Voice mode listens continuously, so the room gets transcribed too. What
+/// separates a person from a passing lorry has to be explicit.
+struct SpeechFilterTests {
+    @Test func realInstructionsGetThrough() {
+        #expect(Voice.isSpeech("Order my usual groceries from Instamart"))
+        #expect(Voice.isSpeech("add earbuds"))
+        #expect(Voice.isSpeech("what does atta cost"))
+    }
+
+    @Test func scribeAudioEventTagsAreNotInstructions() {
+        // Observed live in the simulator: an empty room transcribed as this,
+        // and the session handed it to the agent as something the user said.
+        #expect(!Voice.isSpeech("[outro jingle]"))
+        #expect(!Voice.isSpeech("[music]"))
+        #expect(!Voice.isSpeech("[silence]"))
+        #expect(!Voice.isSpeech("  [BLANK_AUDIO] "))
+    }
+
+    @Test func aTaggedRealSentenceStillCounts() {
+        // Scribe interleaves tags with speech; the speech is what matters.
+        #expect(Voice.isSpeech("[music] order my usual groceries"))
+    }
+
+    @Test func straySyllablesAndSilenceAreIgnored() {
+        #expect(!Voice.isSpeech(""))
+        #expect(!Voice.isSpeech("   "))
+        #expect(!Voice.isSpeech("uh"))
+        #expect(!Voice.isSpeech("."))
+    }
+}

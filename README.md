@@ -337,18 +337,55 @@ widen what the engine will approve. `POST /api/voice/transcribe` takes raw audio
 bytes and returns text; it touches neither the ledger nor the gateway, and a
 test asserts that.
 
-Audio round-trips through the engine's host rather than going to ElevenLabs
+Audio round-trips through the engine's host rather than going to a provider
 directly, for the same reason the Razorpay secret does: a key shipped inside an
 app is a published key.
+
+**Hearing is ElevenLabs Scribe; speaking is either service.** Two synthesisers
+are wired behind one seam and swapped with `BM_TTS_PROVIDER`, so which voice
+ships is a decision made by ear on the recorded demo rather than argued about in
+advance. `POST /api/voice/speak` takes an optional `provider`, which is how both
+can be compared on the same sentence without restarting anything, and it answers
+with the content type the provider actually produced rather than one the app
+assumed.
+
+| | Hearing | Speaking | Format |
+|---|---|---|---|
+| ElevenLabs | Scribe v2 | `eleven_flash_v2_5`, Sarah | mp3, ~1.3 s |
+| Rumik Silk | — | `mulberry`, Indian-English voices | 24 kHz wav, ~2.6 s |
+
+Rumik does not transcribe, so swapping the speaker must not silently swap the
+listener to something that cannot listen. A test pins that.
 
 Text-to-speech failures are swallowed on purpose. Losing audio should never cost
 the user a decision they can already read on screen.
 
-```bash
-ELEVENLABS_API_KEY=sk_...          # the key, not the key ID beside it
-```
+### Voice mode
 
-Unset, the routes return `503` and the app stays text-only.
+Typing and talking are separate doors. The field is for typing and stays
+**silent** — answering a typed line out loud is the app talking over you. The
+button beside it opens a conversation, and it sits outside the text field
+because it does not send that message; it opens a different way of talking
+altogether, and a control inside the field would promise otherwise.
+
+Voice mode runs the loop itself: listen until you stop talking, transcribe, hand
+it to the agent, speak the verdict, listen again. Nothing is pressed twice. End
+of turn is detected from the input meter — 1.4 s below −38 dB — which is enough
+to think mid-sentence and short enough that finishing one ends your turn.
+
+The screen starts almost empty, because before you have said anything there is
+nothing true to show. What it does instead is *react*: the `MeshGradient` is
+driven by live audio level — your voice while it listens, the agent's while it
+speaks — so a screen with no words on it still reads as listening, and never
+looks frozen during the seconds where nothing has been decided. Cards arrive
+only as the conversation earns them.
+
+**The room is not a user.** Scribe tags non-speech as `[music]`,
+`[outro jingle]`, `[silence]`, and those arrive looking exactly like an
+utterance. Forwarding them would let a television in the background talk to an
+agent that spends money. Anything bracketed, and anything under two words, goes
+back to listening without reaching the agent — found by watching an idle
+simulator send `[outro jingle]` to the engine as an instruction.
 
 ### The shopping list
 
