@@ -14,6 +14,7 @@ import SwiftUI
 /// still says *I am listening*.
 struct Backdrop: View {
     @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// 0 at rest, 1 at full voice. Drives brightness and how far the mesh moves.
     var intensity: Double = 0
@@ -21,18 +22,32 @@ struct Backdrop: View {
     var vivid: Bool = false
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
-            let seconds = timeline.date.timeIntervalSinceReferenceDate
-            MeshGradient(
-                width: 3,
-                height: 3,
-                points: Self.points(at: seconds, intensity: intensity),
-                colors: colors
-            )
+        Group {
+            if reduceMotion {
+                // A field that never stops moving is the single worst thing on
+                // this screen for someone who asked for less motion. It keeps
+                // its colour and loses its drift entirely.
+                MeshGradient(
+                    width: 3,
+                    height: 3,
+                    points: Self.points(at: 0, intensity: 0),
+                    colors: colors
+                )
+            } else {
+                TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
+                    let seconds = timeline.date.timeIntervalSinceReferenceDate
+                    MeshGradient(
+                        width: 3,
+                        height: 3,
+                        points: Self.points(at: seconds, intensity: intensity),
+                        colors: colors
+                    )
+                }
+            }
         }
         .background(theme.bgSubtle)
         .ignoresSafeArea()
-        .animation(.easeOut(duration: 0.18), value: intensity)
+        .animation(Motion.respectful(Motion.enter(0.2), reduced: reduceMotion), value: intensity)
     }
 
     // Broken out and explicitly typed: the compiler cannot check these literals

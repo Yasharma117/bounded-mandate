@@ -61,8 +61,27 @@ final class Thread {
 
     /// Voice speaks into the same thread typing does. There is one
     /// conversation; the microphone is a way into it, not a place of its own.
-    func append(_ message: Message) { messages.append(message) }
-    func append(contentsOf added: [Message]) { messages.append(contentsOf: added) }
+    /// How long the message at this index waits before arriving.
+    ///
+    /// Only the last turn staggers. Everything already on screen has a delay of
+    /// zero, so scrolling back through history does not replay an entrance.
+    func delay(for index: Int) -> TimeInterval {
+        let fromEnd = messages.count - 1 - index
+        guard fromEnd >= 0, fromEnd < turnLength else { return 0 }
+        return TimeInterval(turnLength - 1 - fromEnd) * Motion.stagger
+    }
+
+    /// How many messages the most recent turn produced.
+    private(set) var turnLength = 0
+
+    func append(_ message: Message) {
+        turnLength = 1
+        messages.append(message)
+    }
+    func append(contentsOf added: [Message]) {
+        turnLength = added.count
+        messages.append(contentsOf: added)
+    }
 
     /// What the agent says once the engine has ruled. The verdict leads.
     private func narrate(_ decision: Decision) -> String {
@@ -85,23 +104,24 @@ final class Thread {
         defer { busy = false }
 
         let turn = UUID().uuidString
-        messages.append(.said(id: "u-\(turn)", from: .user, text: said))
+        append(.said(id: "u-\(turn)", from: .user, text: said))
 
         do {
             let result = try await Engine.runAgent(said, adversarial: adversarial)
             let spoken = result.decision.map(narrate) ?? result.said
-            messages.append(contentsOf: Message.from(result, spoken: spoken, key: "\(turn)"))
+            append(contentsOf: Message.from(result, spoken: spoken, key: "\(turn)"))
             // Deliberately silent. Typing is a quiet interaction, and
             // answering it aloud is the app talking over you — speech belongs
             // to voice mode, where a conversation is what you asked for.
         } catch {
-            messages.append(.said(id: "e-\(turn)", from: .agent, text: error.localizedDescription))
+            append(.said(id: "e-\(turn)", from: .agent, text: error.localizedDescription))
         }
     }
 }
 
 struct ThreadView: View {
     @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var thread = Thread()
     @State private var draft = ""
     @FocusState private var writing: Bool
@@ -118,15 +138,22 @@ struct ThreadView: View {
             ScrollViewReader { scroller in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(thread.messages) { message in
-                            switch message {
-                            case .said(_, let from, let text):
-                                Bubble(from: from, text: text)
-                            case .ruled(_, let decision):
-                                DecisionCard(decision: decision)
-                            case .priced(_, let product, let offers):
-                                OffersCard(product: product, offers: offers)
+                        ForEach(Array(thread.messages.enumerated()), id: \.element.id) {
+                            index, message in
+                            Group {
+                                switch message {
+                                case .said(_, let from, let text):
+                                    Bubble(from: from, text: text)
+                                case .ruled(_, let decision):
+                                    DecisionCard(decision: decision)
+                                case .priced(_, let product, let offers):
+                                    OffersCard(product: product, offers: offers)
+                                }
                             }
+                            // One turn can produce a sentence and a card. They
+                            // land in sequence rather than together, so the eye
+                            // reads the answer before the evidence.
+                            .arrives(reduceMotion, delay: thread.delay(for: index))
                         }
                         if thread.busy {
                             ProgressView().tint(theme.primary)
@@ -137,7 +164,11 @@ struct ThreadView: View {
                 }
                 .scrollEdgeEffectStyle(.soft, for: .top)
                 .onChange(of: thread.messages.count) {
-                    withAnimation { scroller.scrollTo("end", anchor: .bottom) }
+                    // Slightly behind the entrance, so the new thing is on
+                    // screen by the time the scroll catches up to it.
+                    withAnimation(Motion.move(0.34).delay(Motion.stagger)) {
+                        scroller.scrollTo("end", anchor: .bottom)
+                    }
                 }
             }
             .background(
@@ -193,6 +224,7 @@ struct ThreadView: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(theme.textSubtle)
                     .contentTransition(.opacity)
+                    .animation(Motion.enter(0.2), value: voice?.phase)
             }
 
             GlassEffectContainer(spacing: 22) {
@@ -207,7 +239,10 @@ struct ThreadView: View {
             }
         }
         .padding(.bottom, 8)
-        .animation(.spring(duration: 0.45, bounce: 0.18), value: voice == nil)
+        .animation(
+            Motion.respectful(voice == nil ? Motion.unmorph : Motion.morph, reduced: reduceMotion),
+            value: voice == nil
+        )
     }
 
     private var openers: some View {
@@ -277,7 +312,10 @@ struct ThreadView: View {
             ZStack {
                 Circle()
                     .fill(theme.primary.opacity(0.14))
-                    .scaleEffect(1 + session.level * 0.42)
+                    // 1.22 rather than 1.42: at the old size a loud syllable
+                    // made the control jump, which reads as instability rather
+                    // than as listening.
+                    .scaleEffect(reduceMotion ? 1 : 1 + session.level * 0.22)
                 Image(systemName: symbol(for: session.phase))
                     .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(theme.textNormal)
@@ -286,10 +324,10 @@ struct ThreadView: View {
             .frame(width: 96, height: 96)
             .contentShape(.circle)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .glassEffect(.regular.interactive(), in: .circle)
         .glassEffectID("composer", in: glass)
-        .animation(.easeOut(duration: 0.12), value: session.level)
+        .animation(Motion.respectful(Motion.follow, reduced: reduceMotion), value: session.level)
         .accessibilityLabel("Stop talking")
     }
 

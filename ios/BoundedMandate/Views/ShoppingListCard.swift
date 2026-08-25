@@ -9,6 +9,7 @@ import SwiftUI
 /// after an agent run reports an escalation.
 struct ShoppingListCard: View {
     @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openURL) private var openURL
 
     let list: ShoppingList
@@ -79,6 +80,17 @@ struct ShoppingListCard: View {
                     }
                 }
                 .frame(height: 5)
+                // Removing an item should show the headroom coming back. A
+                // meter that jumps to its new value tells you the number
+                // changed; one that travels tells you which way.
+                .animation(
+                    Motion.respectful(Motion.move(0.28), reduced: reduceMotion),
+                    value: list.capUsed
+                )
+                .animation(
+                    Motion.respectful(Motion.enter(0.2), reduced: reduceMotion),
+                    value: list.overCap
+                )
 
                 Text(
                     list.overCap
@@ -111,7 +123,7 @@ struct ShoppingListCard: View {
         if hiddenCount > 0 {
             Divider().overlay(theme.borderSubtle.opacity(0.5)).padding(.leading, 18)
             Button {
-                withAnimation(.snappy(duration: 0.28)) { expanded.toggle() }
+                withAnimation(Motion.respectful(Motion.move(), reduced: reduceMotion)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 5) {
                     Text(expanded ? "Show less" : "\(hiddenCount) more")
@@ -124,7 +136,7 @@ struct ShoppingListCard: View {
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
         }
     }
 
@@ -135,7 +147,7 @@ struct ShoppingListCard: View {
                     Label("Add an item", systemImage: "plus")
                         .font(.system(size: 14, weight: .medium))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
                 .foregroundStyle(theme.primary)
                 .frame(minHeight: 44)
             }
@@ -189,7 +201,7 @@ struct ItemRow: View {
                         .frame(width: 30, height: 44)
                         .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
             }
 
             if editable, let onRemove {
@@ -200,7 +212,7 @@ struct ItemRow: View {
                         .frame(width: 32, height: 44)
                         .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
             }
         }
         .padding(.leading, 18)

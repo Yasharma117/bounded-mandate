@@ -9,6 +9,7 @@ import SwiftUI
 /// same way.
 struct DecisionCard: View {
     @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let decision: Decision
 
     /// The cart opens by itself when something in it is the reason for the
@@ -84,7 +85,7 @@ struct DecisionCard: View {
 
     @ViewBuilder private var cart: some View {
         Button {
-            withAnimation(.snappy(duration: 0.28)) { showingCart = !cartOpen }
+            withAnimation(Motion.respectful(Motion.move(), reduced: reduceMotion)) { showingCart = !cartOpen }
         } label: {
             HStack(spacing: 6) {
                 Text(
@@ -104,7 +105,7 @@ struct DecisionCard: View {
             .frame(minHeight: 44)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
 
         if cartOpen {
             VStack(spacing: 0) {

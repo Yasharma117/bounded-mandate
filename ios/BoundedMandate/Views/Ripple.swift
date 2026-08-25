@@ -1,26 +1,30 @@
 import SwiftUI
 
-/// A ring that leaves the composer and crosses the screen when the conversation
-/// changes hands.
+/// A ring that leaves the composer when the conversation changes hands.
 ///
 /// Voice has no cursor and no button press to acknowledge. The only way to know
-/// the machine noticed you stopped talking is for something to happen — one
-/// ring per transition, tinted by what it is announcing. It reads from across a
-/// desk and costs nothing to ignore.
+/// the machine noticed you stopped talking is for something to happen — so this
+/// fires once per transition: you stopped, it is thinking, it is speaking.
+///
+/// It is short on purpose. A hand-over happens several times per conversation,
+/// and motion seen that often has to stay under the 300ms budget or it becomes
+/// something to sit through. The first version swept for a full second, which
+/// looked considered once and tedious by the third turn.
 struct Ripple: View {
-    /// Bumping this fires one ring. Phase changes drive it.
+    /// Bumping this fires one ring.
     let trigger: Int
     let color: Color
     /// Where it starts, in unit space. The composer, so it reads as coming
     /// *from* the thing you just spoke into.
     var origin: UnitPoint = .init(x: 0.5, y: 0.88)
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expansion: CGFloat = 0
     @State private var fade: Double = 0
 
     var body: some View {
         GeometryReader { geometry in
-            let widest = max(geometry.size.width, geometry.size.height) * 2.4
+            let widest = max(geometry.size.width, geometry.size.height) * 2.2
             Circle()
                 .stroke(color.opacity(fade), lineWidth: 1.5)
                 .frame(width: widest * expansion, height: widest * expansion)
@@ -28,16 +32,32 @@ struct Ripple: View {
                     x: geometry.size.width * origin.x,
                     y: geometry.size.height * origin.y
                 )
+                // The ring is decoration over a live thread; it must never
+                // cost the reader a frame of the card they are looking at.
+                .drawingGroup()
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
-        .onChange(of: trigger) {
-            expansion = 0
-            fade = 0.5
-            withAnimation(.easeOut(duration: 1.0)) {
-                expansion = 1
-                fade = 0
-            }
+        .onChange(of: trigger) { fire() }
+    }
+
+    private func fire() {
+        // A ring that travels is movement, and movement is the part reduced
+        // motion asks you to drop. The state change still needs marking, so it
+        // becomes a still pulse of colour instead of a sweep.
+        guard !reduceMotion else {
+            fade = 0.28
+            withAnimation(Motion.enter(0.24)) { fade = 0 }
+            return
+        }
+
+        expansion = 0.04
+        fade = 0.5
+        // Retargets from wherever the last ring got to rather than snapping
+        // back to zero, so two fast transitions overlap instead of stuttering.
+        withAnimation(Motion.enter(0.28)) {
+            expansion = 1
+            fade = 0
         }
     }
 }

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		079ADA24D717E9A4B7C0DE1A /* Motion.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC9ABAF932C45378D9A51EB1 /* Motion.swift */; };
 		1014689A9ED39A18BCF9CD06 /* Voice.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9774A61A14E72CF37180810 /* Voice.swift */; };
 		1A4845C7B3965BFAF1B1BB05 /* Decision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 461AAC29A571034CD100B1F6 /* Decision.swift */; };
 		211C722E34BF5CD5BF6BCDE8 /* Bubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = C505FE655A597E914113A48C /* Bubble.swift */; };
@@ -69,6 +70,7 @@
 		BD126AE709CB4010EFDE7B52 /* BoundedMandate.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BoundedMandate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C505FE655A597E914113A48C /* Bubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bubble.swift; sourceTree = "<group>"; };
 		C9736444AF6DBCB412CF4E12 /* turn_escalate.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = turn_escalate.json; sourceTree = "<group>"; };
+		CC9ABAF932C45378D9A51EB1 /* Motion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Motion.swift; sourceTree = "<group>"; };
 		E2FE80D8D802D5B02E2DF3C0 /* Surfaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Surfaces.swift; sourceTree = "<group>"; };
 		E850AA83E9DF20D02B3CD3B9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E9774A61A14E72CF37180810 /* Voice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voice.swift; sourceTree = "<group>"; };
@@ -151,6 +153,7 @@
 		B19C5F412F1F1ACCF5ED8BCB /* Theme */ = {
 			isa = PBXGroup;
 			children = (
+				CC9ABAF932C45378D9A51EB1 /* Motion.swift */,
 				6C88F6845192AEB050232DC9 /* Tokens.swift */,
 			);
 			path = Theme;
@@ -281,6 +284,7 @@
 				8FD3457E71F4DB10703ABC65 /* Gallery.swift in Sources */,
 				22254A44218ED4D318B4DCD6 /* ListSheet.swift in Sources */,
 				2EAA76FA814C1B7745FC0E41 /* MandateCard.swift in Sources */,
+				079ADA24D717E9A4B7C0DE1A /* Motion.swift in Sources */,
 				E1F4E838FDCC3F49630592FB /* OffersCard.swift in Sources */,
 				48F5D8818E08FBE4ACD83A38 /* Ripple.swift in Sources */,
 				D1E861CE4594428BD4513065 /* ShoppingListCard.swift in Sources */,

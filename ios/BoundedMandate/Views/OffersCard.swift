@@ -104,7 +104,7 @@ private struct OfferRow: View {
                     .frame(width: 30, height: 44)
                     .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
         }
         .padding(.leading, 18)
         .padding(.trailing, 8)
