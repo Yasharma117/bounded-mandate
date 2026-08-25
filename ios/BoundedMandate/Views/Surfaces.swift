@@ -59,7 +59,8 @@ struct DetailRow: View {
     }
 }
 
-/// One reason, as the engine phrased it, with its machine code above it.
+/// One reason, in words. The machine code stays in the ledger where it belongs;
+/// a card is not the place to teach someone `category.not_allowed`.
 struct ReasonRow: View {
     @Environment(\.theme) private var theme
     let reason: Reason
@@ -69,8 +70,8 @@ struct ReasonRow: View {
         HStack(alignment: .top, spacing: 11) {
             Capsule().fill(tint).frame(width: 2)
             VStack(alignment: .leading, spacing: 3) {
-                Text(reason.code)
-                    .font(.system(size: 11, design: .monospaced))
+                Text(reason.title)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(tint)
                 Text(reason.detail)
                     .font(.system(size: 14))

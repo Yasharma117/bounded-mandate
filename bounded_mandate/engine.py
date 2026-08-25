@@ -40,6 +40,12 @@ class Verdict(StrEnum):
 _SEVERITY = {Verdict.ALLOW: 0, Verdict.CLARIFY: 1, Verdict.ESCALATE: 2, Verdict.DENY: 3}
 
 
+def _plural(count: int, noun: str) -> str:
+    """ "1 item", not "1 item(s)". These strings are read by a person, and
+    `(s)` is the sound a form makes, not a sentence."""
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
 # A refused proposal is ordinary — an agent can be wrong. A burst of them is
 # not: it is something testing where the edges are. Once that pattern shows,
 # nothing under this mandate runs silently until a human has looked, including
@@ -181,7 +187,7 @@ def _policy_reasons(cart: Cart, policy: Policy, prior_charges: int) -> list[Reas
             Reason(
                 "category.not_allowed",
                 Verdict.ESCALATE,
-                f"{len(off_scope)} item(s) outside your scope: {', '.join(off_scope)}.",
+                f"{_plural(len(off_scope), 'item')} outside your scope: {', '.join(off_scope)}.",
             )
         )
     if unknown:
@@ -213,7 +219,8 @@ def _policy_reasons(cart: Cart, policy: Policy, prior_charges: int) -> list[Reas
             Reason(
                 "frequency.exceeded",
                 Verdict.ESCALATE,
-                f"Already {prior_charges} order(s) in the last {policy.window_days} days.",
+                f"Already {_plural(prior_charges, 'order')} in the last "
+                f"{_plural(policy.window_days, 'day')}.",
             )
         )
 

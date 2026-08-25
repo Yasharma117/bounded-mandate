@@ -27,8 +27,25 @@ enum Verdict: String, Codable, Sendable {
 }
 
 struct Reason: Codable, Hashable, Sendable {
+    /// What the ledger stores. Never shown to a user.
     let code: String
+    /// The same thing in words, decided server-side so the machine name and
+    /// the human one cannot drift apart in a client nobody updated.
+    let title: String
     let detail: String
+
+    init(from decoder: any Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        code = try box.decode(String.self, forKey: .code)
+        detail = try box.decode(String.self, forKey: .detail)
+        title = try box.decodeIfPresent(String.self, forKey: .title) ?? code
+    }
+
+    init(code: String, title: String, detail: String) {
+        self.code = code
+        self.title = title
+        self.detail = detail
+    }
 }
 
 /// One line of the cart the engine actually fetched — not the one the agent
@@ -76,8 +93,22 @@ struct Decision: Codable, Hashable, Sendable, Identifiable {
     let items: [CartLine]
     let merchant: String?
 
+    /// The same verdict in words. `category.not_allowed+cap.exceeded` is right
+    /// for the ledger and wrong for someone who just wanted groceries.
+    let summary: String
+    /// What happened to the money, in plain words. "Reached the rail" is our
+    /// vocabulary, not theirs.
+    let settlement: String
+
     var id: String { idempotencyKey + reasonCode }
     var flagged: [CartLine] { items.filter(\.flagged) }
+
+    /// Flagged lines first. The two items that caused a refusal should not be
+    /// at the bottom of fourteen rows the reader has to scroll past to find
+    /// the answer to the question the card just raised.
+    var orderedItems: [CartLine] {
+        items.filter(\.flagged) + items.filter { !$0.flagged }
+    }
 
     /// The agent misreported its own cart. The engine caught it by refetching.
     var lied: Bool { claimedTotalPaise != realTotalPaise }
@@ -93,7 +124,7 @@ struct Decision: Codable, Hashable, Sendable, Identifiable {
         case orderID = "order_id"
         case keyID = "key_id"
         case paymentID = "payment_id"
-        case items, merchant
+        case items, merchant, summary, settlement
     }
 
     init(from decoder: any Decoder) throws {
@@ -110,13 +141,16 @@ struct Decision: Codable, Hashable, Sendable, Identifiable {
         paymentID = try box.decodeIfPresent(String.self, forKey: .paymentID)
         items = try box.decodeIfPresent([CartLine].self, forKey: .items) ?? []
         merchant = try box.decodeIfPresent(String.self, forKey: .merchant)
+        summary = try box.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        settlement = try box.decodeIfPresent(String.self, forKey: .settlement) ?? ""
     }
 
     init(
         verdict: Verdict, reasonCode: String, reasons: [Reason], cartID: String,
         realTotalPaise: Int, claimedTotalPaise: Int, idempotencyKey: String,
         orderID: String?, keyID: String?, paymentID: String?,
-        items: [CartLine] = [], merchant: String? = nil
+        items: [CartLine] = [], merchant: String? = nil,
+        summary: String = "", settlement: String = ""
     ) {
         self.verdict = verdict
         self.reasonCode = reasonCode
@@ -130,6 +164,8 @@ struct Decision: Codable, Hashable, Sendable, Identifiable {
         self.paymentID = paymentID
         self.items = items
         self.merchant = merchant
+        self.summary = summary
+        self.settlement = settlement
     }
 }
 

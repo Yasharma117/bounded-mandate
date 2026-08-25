@@ -194,23 +194,25 @@ enum Fixtures {
             cartID: "instamart_cart_1", realTotalPaise: 185_000, claimedTotalPaise: 185_000,
             idempotencyKey: "b9f1e053257bba1a53c01ed9d81d5f6b",
             orderID: "order_TTaACDfd7hLVNp", keyID: "rzp_test", paymentID: nil,
-            items: usualLines, merchant: "instamart"
+            items: usualLines, merchant: "instamart",
+            summary: "Within your rule", settlement: "Order placed, not yet paid"
         ),
         Decision(
             verdict: .clarify, reasonCode: "category.unknown",
-            reasons: [.init(code: "category.unknown",
+            reasons: [.init(code: "category.unknown", title: "Might not be in scope",
                             detail: "Not sure these are in scope: Whey protein 1kg.")],
             cartID: "instamart_cart_2", realTotalPaise: 32_000, claimedTotalPaise: 32_000,
             idempotencyKey: "c1d2e3f4a5b6", orderID: nil, keyID: nil, paymentID: nil,
             items: [line("Whey protein 1kg", 32_000, category: "", unclassified: true)],
-            merchant: "instamart"
+            merchant: "instamart",
+            summary: "Might not be in scope", settlement: "Nothing was charged"
         ),
         Decision(
             verdict: .escalate, reasonCode: "category.not_allowed+cap.exceeded",
             reasons: [
-                .init(code: "category.not_allowed",
+                .init(code: "category.not_allowed", title: "Not what you allowed",
                       detail: "2 item(s) outside your scope: Bluetooth earbuds, Phone case."),
-                .init(code: "cap.exceeded", detail: "₹400 over your cap."),
+                .init(code: "cap.exceeded", title: "Over your limit", detail: "₹400 over your cap."),
             ],
             cartID: "instamart_cart_3", realTotalPaise: 240_000, claimedTotalPaise: 240_000,
             idempotencyKey: "d4e5f6a7b8c9", orderID: nil, keyID: nil, paymentID: nil,
@@ -225,12 +227,12 @@ enum Fixtures {
             reasonCode:
                 "provenance.total_mismatch+category.not_allowed+cap.exceeded+agent.probing",
             reasons: [
-                .init(code: "provenance.total_mismatch",
+                .init(code: "provenance.total_mismatch", title: "The agent misreported the total",
                       detail: "Agent claimed ₹1,000, the real cart is ₹16,850."),
-                .init(code: "category.not_allowed",
+                .init(code: "category.not_allowed", title: "Not what you allowed",
                       detail: "1 item(s) outside your scope: Smartwatch."),
-                .init(code: "cap.exceeded", detail: "₹14,850 over your cap."),
-                .init(code: "agent.probing",
+                .init(code: "cap.exceeded", title: "Over your limit", detail: "₹14,850 over your cap."),
+                .init(code: "agent.probing", title: "This agent keeps trying",
                       detail: "3 refused attempts in the last hour. This agent may be "
                             + "compromised — nothing runs on its own until you have looked."),
             ],
@@ -239,7 +241,9 @@ enum Fixtures {
             items: usualLines + [
                 line("Smartwatch", 1_500_000, category: "electronics", offScope: true)
             ],
-            merchant: "instamart"
+            merchant: "instamart",
+            summary: "The agent misreported the total and over your limit",
+            settlement: "Nothing was charged"
         ),
         Decision(
             verdict: .allow, reasonCode: "ok.in_policy", reasons: [],
@@ -247,7 +251,8 @@ enum Fixtures {
             idempotencyKey: "f6a7b8c9d0e1", orderID: "order_TTaBBDfd7hLVNq",
             keyID: "rzp_test", paymentID: "pay_TTMncCDOzWLlpK",
             items: [line("Bluetooth earbuds", 40_000, category: "electronics")],
-            merchant: "instamart"
+            merchant: "instamart",
+            summary: "Within your rule", settlement: "Paid"
         ),
     ]
 }

@@ -34,6 +34,7 @@ from .ledger import Ledger
 from .merchant import Marketplace, UnknownItem, UnknownMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
 from .voice import SPEAKERS, TTS_PROVIDER, VoiceUnavailable, speak, transcribe
+from .wording import summary, title
 
 app = FastAPI(title="Bounded Mandate", docs_url="/api/docs")
 
@@ -117,17 +118,31 @@ def _rendered(decision, *, claimed_total_paise: int, cart_items: int) -> dict:
         }
         for item in (cart.items if cart else ())
     ]
+    settled = _settle(decision, cart_items)
     return {
         "items": items,
         "merchant": cart.merchant if cart else None,
         "verdict": decision.verdict.value,
+        # Both forms. The code is what the ledger stores and tests assert on;
+        # the summary is what a person who just wanted groceries can read.
         "reason_code": decision.reason_code,
-        "reasons": [{"code": r.code, "detail": r.detail} for r in decision.reasons],
+        "summary": summary(decision.reason_code),
+        "reasons": [
+            {"code": r.code, "title": title(r.code), "detail": r.detail} for r in decision.reasons
+        ],
+        # "Reached the rail" is our vocabulary, not theirs.
+        "settlement": (
+            "Paid"
+            if settled.get("payment_id")
+            else "Order placed, not yet paid"
+            if settled.get("order_id")
+            else "Nothing was charged"
+        ),
         "cart_id": decision.cart_id,
         "real_total_paise": decision.total_paise,
         "claimed_total_paise": claimed_total_paise,
         "idempotency_key": decision.idempotency_key,
-        **_settle(decision, cart_items),
+        **settled,
     }
 
 

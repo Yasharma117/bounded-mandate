@@ -94,6 +94,7 @@ struct PayloadTests {
         // what the ledger already holds, so pinning a number would make this
         // test a record of one run's history rather than of the behaviour.
         #expect(decision.reasons.count >= 2, "a refusal should stack its reasons")
+        #expect(decision.reasonCode.contains("provenance.total_mismatch"))
         #expect(decision.lied)
         #expect(decision.claimedTotalPaise < decision.realTotalPaise)
         // Reason codes are the card's row keys; duplicates would drop rows.
@@ -327,3 +328,57 @@ struct SurfacedCardTests {
 }
 
 private final class SurfacedBundleMarker {}
+
+/// A card is the product's voice. Nothing on it should look like a symbol.
+struct CardCopyTests {
+    private func decode<T: Decodable>(_ type: T.Type, _ name: String) throws -> T {
+        let url = try #require(
+            Bundle(for: CopyBundleMarker.self).url(forResource: name, withExtension: "json"),
+            "missing fixture \(name).json"
+        )
+        return try JSONDecoder().decode(type, from: try Data(contentsOf: url))
+    }
+
+    @Test func nothingAUserReadsLooksLikeAnIdentifier() throws {
+        let turn = try decode(AgentTurn.self, "turn_deny")
+        let decision = try #require(turn.decision)
+
+        // The code still travels — the ledger needs it — but nothing rendered
+        // from it may carry an underscore or a dotted path.
+        #expect(decision.reasonCode.contains("."), "the machine name is still there")
+        let surfaces = [decision.summary, decision.settlement]
+            + decision.reasons.map(\.title)
+            + decision.reasons.map(\.detail)
+        for surface in surfaces {
+            #expect(!surface.contains("_"), "\(surface) reads like a symbol")
+            #expect(!surface.contains("(s)"), "\(surface) reads like a form")
+        }
+    }
+
+    @Test func theCardNeverSaysRail() throws {
+        for name in ["turn_deny", "turn_escalate"] {
+            let turn = try decode(AgentTurn.self, name)
+            let decision = try #require(turn.decision)
+            #expect(!decision.settlement.lowercased().contains("rail"))
+            #expect(decision.settlement == "Nothing was charged")
+        }
+    }
+
+    @Test func theItemsThatCausedTheRefusalComeFirst() throws {
+        let turn = try decode(AgentTurn.self, "turn_escalate")
+        let decision = try #require(turn.decision)
+        #expect(decision.flagged.count == 2)
+
+        // Two flagged rows should not sit at the bottom of fourteen the reader
+        // has to scroll past to find why they were interrupted.
+        let ordered = decision.orderedItems
+        let firstTwoAreFlagged = ordered.prefix(2).allSatisfy { $0.flagged }
+        #expect(firstTwoAreFlagged)
+        // And reordering must not lose or duplicate a line.
+        #expect(ordered.count == decision.items.count)
+        #expect(Set(ordered.map(\.name)) == Set(decision.items.map(\.name)))
+        #expect(ordered.map(\.pricePaise).reduce(0, +) == decision.realTotalPaise)
+    }
+}
+
+private final class CopyBundleMarker {}

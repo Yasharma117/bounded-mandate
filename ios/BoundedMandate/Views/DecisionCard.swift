@@ -68,18 +68,12 @@ struct DecisionCard: View {
                 Divider().overlay(theme.borderSubtle)
 
                 VStack(spacing: 9) {
-                    DetailRow(
-                        label: "Decision",
-                        value: decision.reasonCode,
-                        mono: true,
-                        color: tint
-                    )
-                    if let payment = decision.paymentID {
-                        DetailRow(label: "Paid", value: payment, mono: true)
-                    } else if let order = decision.orderID {
-                        DetailRow(label: "Order", value: order, mono: true)
-                    } else {
-                        DetailRow(label: "Reached the rail", value: "no")
+                    // Words, not codes. The reference is worth showing because
+                    // it is something the user could quote back to support; the
+                    // reason string is not.
+                    DetailRow(label: "Outcome", value: decision.settlement, color: tint)
+                    if let reference = decision.paymentID ?? decision.orderID {
+                        DetailRow(label: "Reference", value: reference, mono: true)
                     }
                 }
                 .padding(.horizontal, 18)
@@ -114,7 +108,7 @@ struct DecisionCard: View {
 
         if cartOpen {
             VStack(spacing: 0) {
-                ForEach(decision.items) { line in
+                ForEach(decision.orderedItems) { line in
                     HStack(spacing: 10) {
                         Text(line.name)
                             .font(.system(size: 14))

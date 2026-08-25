@@ -335,3 +335,24 @@ def test_escalations_are_not_counted_as_probing(policies, ledger):
         Proposal("mdt_1", "cart_1", 185_000), policies, merchant_holding(groceries()), ledger
     )
     assert clean.verdict is Verdict.ALLOW
+
+
+def test_reason_prose_is_written_for_a_person_not_a_form(policy, policies, ledger):
+    """`1 item(s)` is the sound a form makes. These strings are read aloud by a
+    voice agent and printed on a card, so they have to be sentences."""
+    cart = Cart(
+        cart_id="cart_1",
+        merchant="instamart",
+        items=(CartItem("Bluetooth earbuds", 40_000, "electronics"),),
+        delivery_address=HOME,
+    )
+    decision = decide(
+        Proposal(policy.mandate_id, cart.cart_id, 40_000),
+        policies=policies,
+        adapter=merchant_holding(cart),
+        ledger=ledger,
+        now=NOW,
+    )
+    prose = " ".join(reason.detail for reason in decision.reasons)
+    assert "(s)" not in prose
+    assert "1 item outside your scope" in prose

@@ -438,3 +438,35 @@ def test_the_app_sees_policy_flags_the_agent_never_did(client, monkeypatch):
     assert by_merchant["blinkit"]["merchant_allowed"] is False
     assert by_merchant["instamart"]["merchant_allowed"] is True
     assert all(o["url"].startswith("/m/") for o in offers)
+
+
+def test_a_verdict_reaches_the_app_in_words_as_well_as_codes(client, monkeypatch):
+    """`category.not_allowed+cap.exceeded` is right for the ledger and wrong for
+    a person. Both forms travel; the app decides which to show."""
+    monkeypatch.setattr(
+        web, "BuyerAgent", lambda **kw: FakeAgent(run_result=_agent_run(Verdict.DENY), **kw)
+    )
+    decision = client.post("/api/agent", json={"text": "order"}).json()["decision"]
+
+    assert decision["reason_code"] == "cap.exceeded"
+    assert decision["summary"] == "Over your limit"
+    assert decision["reasons"][0]["title"] == "Over your limit"
+    # And nothing in what a user reads still looks like an identifier.
+    assert "_" not in decision["summary"]
+    assert all("_" not in r["title"] for r in decision["reasons"])
+
+
+def test_the_card_says_what_happened_to_the_money_without_saying_rail(client, monkeypatch):
+    monkeypatch.setattr(
+        web, "BuyerAgent", lambda **kw: FakeAgent(run_result=_agent_run(Verdict.DENY), **kw)
+    )
+    refused = client.post("/api/agent", json={"text": "order"}).json()["decision"]
+    assert refused["settlement"] == "Nothing was charged"
+
+    monkeypatch.setattr(
+        web, "BuyerAgent", lambda **kw: FakeAgent(run_result=_agent_run(Verdict.ALLOW), **kw)
+    )
+    allowed = client.post("/api/agent", json={"text": "order"}).json()["decision"]
+    # Honest about the gap: an order exists, but nothing has been captured.
+    assert allowed["settlement"] == "Order placed, not yet paid"
+    assert "rail" not in allowed["settlement"].lower()
