@@ -128,6 +128,10 @@ struct ThreadView: View {
     @Namespace private var glass
     /// One bump per state change, which is what the ripple listens to.
     @State private var pulse = 0
+    /// 0 in the thread, 1 in voice mode. Animated rather than flipped, so the
+    /// background arrives with the morph instead of cutting to blue a frame
+    /// before it.
+    @State private var voiceness: Double = 0
 
     var body: some View {
         NavigationStack {
@@ -143,17 +147,7 @@ struct ThreadView: View {
                     // long enough to matter.
                     VStack(alignment: .leading, spacing: 14) {
                         ForEach(thread.messages) { message in
-                            Group {
-                                switch message {
-                                case .said(_, let from, let text):
-                                    Bubble(from: from, text: text)
-                                case .ruled(_, let decision):
-                                    DecisionCard(decision: decision)
-                                case .priced(_, let product, let offers):
-                                    OffersCard(product: product, offers: offers)
-                                }
-                            }
-                            .arrives(reduceMotion, delay: thread.delays[message.id] ?? 0)
+                            row(message)
                         }
                         if thread.busy {
                             ProgressView().tint(theme.primary)
@@ -171,12 +165,7 @@ struct ThreadView: View {
                     }
                 }
             }
-            .background(
-                ZStack {
-                    Backdrop(intensity: voice?.level ?? 0, vivid: voice != nil)
-                    Ripple(trigger: pulse, color: theme.primary)
-                }
-            )
+            .background(backdrop)
             .navigationTitle("Bounded Mandate")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -213,6 +202,7 @@ struct ThreadView: View {
         VStack(spacing: 10) {
             if voice == nil {
                 openers
+                    .transition(.opacity.animation(Motion.enter(0.14)))
             } else if let problem = voice?.problem {
                 Text(problem)
                     .font(.system(size: 12))
@@ -285,6 +275,12 @@ struct ThreadView: View {
                     }
                 }
             }
+            // The glass shape morphs; its *contents* do not. Letting the
+            // placeholder ride the morph left a "Mandat…" ghost smeared across
+            // the transition — text has no business being interpolated into a
+            // circle. It leaves first, quickly, and the shape follows.
+            .opacity(voice == nil ? 1 : 0)
+            .animation(Motion.enter(0.12), value: voice == nil)
             .padding(.leading, 18)
             .padding(.trailing, draft.trimmingCharacters(in: .whitespaces).isEmpty ? 18 : 6)
             .padding(.vertical, 6)
@@ -341,11 +337,34 @@ struct ThreadView: View {
         }
     }
 
+    @ViewBuilder
+    private func row(_ message: Message) -> some View {
+        Group {
+            switch message {
+            case .said(_, let from, let text):
+                Bubble(from: from, text: text)
+            case .ruled(_, let decision):
+                DecisionCard(decision: decision)
+            case .priced(_, let product, let offers):
+                OffersCard(product: product, offers: offers)
+            }
+        }
+        .arrives(reduceMotion, delay: thread.delays[message.id] ?? 0)
+    }
+
+    private var backdrop: some View {
+        ZStack {
+            Backdrop(voiceness: voiceness, level: voice?.level ?? 0)
+            Ripple(trigger: pulse, color: theme.primary)
+        }
+    }
+
     private func startTalking() {
         writing = false
         let session = VoiceSession(thread: thread)
         voice = session
         pulse += 1
+        withAnimation(Motion.respectful(Motion.morph, reduced: reduceMotion)) { voiceness = 1 }
         Task { await session.start() }
     }
 
@@ -353,6 +372,7 @@ struct ThreadView: View {
         voice?.stop()
         voice = nil
         pulse += 1
+        withAnimation(Motion.respectful(Motion.unmorph, reduced: reduceMotion)) { voiceness = 0 }
     }
 
     private func submit() {

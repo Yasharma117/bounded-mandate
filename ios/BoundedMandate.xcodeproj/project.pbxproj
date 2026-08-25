@@ -31,6 +31,7 @@
 		D1E861CE4594428BD4513065 /* ShoppingListCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B62812298D584BB58C041C20 /* ShoppingListCard.swift */; };
 		D400D29C8D8E0A2DF378D6FB /* Tokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C88F6845192AEB050232DC9 /* Tokens.swift */; };
 		E1F4E838FDCC3F49630592FB /* OffersCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EA33E9B6CFE9D623F014033 /* OffersCard.swift */; };
+		E8E86BB782DE0D8604751804 /* AudioIO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA6E6C521E21C14C2113E65 /* AudioIO.swift */; };
 		ED50CCCD43F56EF4482B05A2 /* BoundedMandateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483AA4A36F0EBA528FDE34FD /* BoundedMandateApp.swift */; };
 		F48BA24A998CD6A92131DC57 /* list.json in Resources */ = {isa = PBXBuildFile; fileRef = 69F76D401D3789726BA2990F /* list.json */; };
 /* End PBXBuildFile section */
@@ -58,6 +59,7 @@
 		475F8843619C3FBCD0806282 /* ThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadView.swift; sourceTree = "<group>"; };
 		483AA4A36F0EBA528FDE34FD /* BoundedMandateApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedMandateApp.swift; sourceTree = "<group>"; };
 		4B4772911BE45B54FA37B34F /* turn_prices.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = turn_prices.json; sourceTree = "<group>"; };
+		4DA6E6C521E21C14C2113E65 /* AudioIO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioIO.swift; sourceTree = "<group>"; };
 		547E104CAEC12ADCF7194C89 /* offers_category_blocked.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = offers_category_blocked.json; sourceTree = "<group>"; };
 		5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListSheet.swift; sourceTree = "<group>"; };
 		65F3DEBE3C2F147F07F33CE0 /* BoundedMandateTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BoundedMandateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -130,6 +132,7 @@
 		9928E8720ACDA61F82C98EB7 /* Net */ = {
 			isa = PBXGroup;
 			children = (
+				4DA6E6C521E21C14C2113E65 /* AudioIO.swift */,
 				06DE233A9339DC5D9DBBE6CD /* Engine.swift */,
 				E9774A61A14E72CF37180810 /* Voice.swift */,
 				08994E31838B4504D06AEDCB /* VoiceSession.swift */,
@@ -274,6 +277,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E8E86BB782DE0D8604751804 /* AudioIO.swift in Sources */,
 				476F81A3B192453D8ECA466D /* Backdrop.swift in Sources */,
 				2DE0B3BCCFBF3212E0ECCD7A /* Basket.swift in Sources */,
 				ED50CCCD43F56EF4482B05A2 /* BoundedMandateApp.swift in Sources */,

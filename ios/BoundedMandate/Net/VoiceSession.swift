@@ -14,9 +14,9 @@ import SwiftUI
 /// would need its own layout for cards, and the first thing that layout did was
 /// clip them.
 ///
-/// Speech is still an **utterance**. It reaches the agent with exactly the
-/// standing that typing has, and the engine decides either way — a voice channel
-/// widens what can be *said*, never what will be *authorised*.
+/// This type holds state and nothing else. Every Core Audio call lives in
+/// `AudioIO`, off the main thread, because doing it here froze the composer
+/// morph for as long as the audio session took to come up.
 @MainActor @Observable
 final class VoiceSession {
     enum Phase: Equatable {
@@ -46,39 +46,17 @@ final class VoiceSession {
     init(thread: Thread) { self.thread = thread }
 
     /// Stop after this much quiet **once you have actually said something**.
-    /// Long enough to think mid-sentence, short enough that finishing one ends
-    /// your turn.
     private let silenceSeconds: TimeInterval = 1.4
     private let silenceThreshold: Float = -38
     /// How long to wait for a first word before admitting it cannot hear you.
-    /// Silence forever is indistinguishable from a broken microphone, and the
-    /// screen should not make you guess which it is.
     private let patienceSeconds: TimeInterval = 12
 
-    private var recorder: AVAudioRecorder?
-    private var player: AVAudioPlayer?
-    private var meter: Task<Void, Never>?
+    private let audio = AudioIO()
+    private var loop: Task<Void, Never>?
     private var quietSince: Date?
-    /// Whether this turn has heard speech yet. Without it the silence timer
-    /// starts on the quiet *before* you speak and ends the turn about a second
-    /// after the microphone opens — which is a turn of empty room, every time.
     private var heardSpeech = false
     private var openedMic: Date?
     private var running = false
-
-    /// Smooth the meter here rather than by animating it in the view.
-    ///
-    /// This value changes twenty times a second; attaching a 200ms animation to
-    /// it stacks twenty overlapping animations per second, which costs frames
-    /// and makes the result mushy rather than smooth. An exponential average
-    /// gives the same softness for one multiply.
-    private func smoothed(_ sample: Double) -> Double {
-        let rising = sample > level
-        // Quick to react, slow to fall — a voice that stops should leave the
-        // field settling rather than dropping out from under itself.
-        let weight = rising ? 0.55 : 0.18
-        return level + (sample - level) * weight
-    }
     /// Which service speaks. Changed live, so both can be judged by ear.
     private var provider: String?
 
@@ -96,79 +74,80 @@ final class VoiceSession {
             return
         }
         running = true
-        await listen()
+        // The whole conversation is one task. Cancelling it is how it stops,
+        // which means no path can leave a half-configured session behind.
+        loop = Task { await converse() }
     }
 
     func stop() {
         running = false
-        meter?.cancel()
-        meter = nil
-        recorder?.stop()
-        recorder = nil
-        player?.stop()
-        player = nil
+        loop?.cancel()
+        loop = nil
         quietSince = nil
         level = 0
         phase = .idle
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        Task { await audio.end() }
     }
 
-    private func listen() async {
-        guard running else { return }
+    private func converse() async {
         do {
-            try AVAudioSession.sharedInstance().setCategory(
-                .playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetooth]
-            )
-            try AVAudioSession.sharedInstance().setActive(true)
-
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("turn-\(UUID().uuidString).m4a")
-            let recorder = try AVAudioRecorder(url: url, settings: [
-                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 44_100,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-            ])
-            recorder.isMeteringEnabled = true
-            recorder.record()
-            self.recorder = recorder
-            phase = .listening
-            quietSince = nil
-            heardSpeech = false
-            openedMic = Date()
-            startMetering()
+            // Once per voice mode, not once per turn. Every hand-over used to
+            // pay this again, which is why later turns felt worse than the
+            // first.
+            try await audio.begin()
         } catch {
             problem = error.localizedDescription
             stop()
+            return
+        }
+
+        while running, !Task.isCancelled {
+            guard let heard = await listen() else { break }
+            guard Voice.isSpeech(heard) else { continue }
+            await answer(heard)
         }
     }
 
-    /// Polls the input level, both to drive the backdrop and to notice that the
-    /// speaker has finished. Cheap enough at 20 Hz that a real VAD would be
-    /// ceremony — this only has to tell speech from a quiet room.
-    ///
-    /// The turn is finished *inside* this task rather than by cancelling it.
-    /// Cancelling the task that is doing the work makes its own next `await`
-    /// throw, which surfaced to the user as the word "cancelled".
-    private func startMetering() {
-        meter?.cancel()
-        meter = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(50))
-                guard let self else { return }
-                if await self.sampleLevel() {
-                    await self.finishTurn()
-                    return
-                }
-            }
+    /// Records until the speaker goes quiet, then transcribes. `nil` ends the
+    /// conversation; an empty string means "nothing worth sending, go again".
+    private func listen() async -> String? {
+        phase = .listening
+        quietSince = nil
+        heardSpeech = false
+        openedMic = Date()
+
+        do {
+            _ = try await audio.startRecording()
+        } catch {
+            problem = error.localizedDescription
+            return nil
+        }
+
+        while running, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(50))
+            guard let power = await audio.inputPower() else { break }
+            if await meter(power) { break }
+        }
+        guard running, !Task.isCancelled else { return nil }
+
+        phase = .thinking
+        level = 0
+
+        do {
+            let captured = try await audio.finishRecording()
+            // Shorter than this is the room moving, not a person.
+            guard captured.count > 4_000 else { return "" }
+            return try await Voice.transcribe(captured)
+        } catch is CancellationError {
+            return nil
+        } catch {
+            problem = error.localizedDescription
+            return ""
         }
     }
 
-    /// Returns true when the speaker has gone quiet for long enough.
-    private func sampleLevel() async -> Bool {
-        guard let recorder, phase == .listening else { return false }
-        recorder.updateMeters()
-        let power = recorder.averagePower(forChannel: 0)
+    /// Returns true when the turn is over. Also drives the backdrop.
+    private func meter(_ power: Float) async -> Bool {
         // -60 dB is effectively silence, 0 is clipping. Squared so quiet speech
         // still moves the field without loud speech pinning it.
         let normalised = Double(max(0, (power + 60) / 60))
@@ -181,7 +160,8 @@ final class VoiceSession {
         }
 
         // Nothing said yet: this is the pause before you start, not the pause
-        // after you finish. Waiting is the correct behaviour — up to a point.
+        // after you finish. Waiting is correct — up to a point, because silence
+        // forever and a broken microphone look identical from the outside.
         guard heardSpeech else {
             if let opened = openedMic, Date().timeIntervalSince(opened) >= patienceSeconds {
                 problem = "I can't hear anything. Check the microphone, then tap to try again."
@@ -195,33 +175,11 @@ final class VoiceSession {
         return Date().timeIntervalSince(since) >= silenceSeconds
     }
 
-    private func finishTurn() async {
-        meter = nil
-        guard let recorder else { return }
-        recorder.stop()
-        let url = recorder.url
-        self.recorder = nil
-        level = 0
-        phase = .thinking
-
-        defer { try? FileManager.default.removeItem(at: url) }
-        guard let audio = try? Data(contentsOf: url), audio.count > 4_000 else {
-            // Too short to be speech — the room moved, not a person. Resume.
-            await listen()
-            return
-        }
+    private func answer(_ heard: String) async {
+        let key = UUID().uuidString
+        thread.append(.said(id: "u-\(key)", from: .user, text: heard))
 
         do {
-            let heard = try await Voice.transcribe(audio)
-            // The room is not a user. Anything that is not speech goes back to
-            // listening without ever reaching the agent.
-            guard Voice.isSpeech(heard) else {
-                await listen()
-                return
-            }
-            let key = UUID().uuidString
-            thread.append(.said(id: "u-\(key)", from: .user, text: heard))
-
             let result = try await Engine.runAgent(heard)
             let spoken = result.decision.map(Self.narrate) ?? result.said
             // Cards arrive as the conversation earns them. Spoken numbers are
@@ -230,15 +188,13 @@ final class VoiceSession {
             thread.append(contentsOf: Message.from(result, spoken: spoken, key: key))
             await say(spoken)
         } catch is CancellationError {
-            return  // the session was stopped mid-turn; not a fault to report
+            return
         } catch {
             problem = error.localizedDescription
         }
-
-        await listen()
     }
 
-    /// Speaks, and drives the backdrop from playback so the field keeps moving
+    /// Speaks, driving the backdrop from playback so the field keeps moving
     /// while the agent talks — silence there would read as a dropped call.
     private func say(_ text: String) async {
         guard running, let spoken = await Voice.audio(for: text, provider: provider) else {
@@ -246,24 +202,30 @@ final class VoiceSession {
         }
         phase = .speaking
         do {
-            let player = try AVAudioPlayer(data: spoken)
-            player.isMeteringEnabled = true
-            player.play()
-            self.player = player
-
-            // Driving the field from playback keeps it alive while the agent
-            // talks — a still screen here reads as a dropped call.
-            while running, player.isPlaying {
-                player.updateMeters()
-                let power = player.averagePower(forChannel: 0)
-                level = smoothed(Double(max(0, (power + 50) / 50)))
-                try? await Task.sleep(for: .milliseconds(50))
-            }
+            try await audio.startPlaying(spoken)
         } catch {
             problem = error.localizedDescription
+            return
         }
-        player = nil
+        while running, !Task.isCancelled, let power = await audio.outputPower() {
+            level = smoothed(Double(max(0, (power + 50) / 50)))
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        await audio.stopPlaying()
         level = 0
+    }
+
+    /// Smooth the meter here rather than by animating it in the view.
+    ///
+    /// This value changes twenty times a second; attaching a 200ms animation to
+    /// it stacks twenty overlapping animations per second, which costs frames
+    /// and makes the result mushy rather than smooth. An exponential average
+    /// gives the same softness for one multiply.
+    private func smoothed(_ sample: Double) -> Double {
+        // Quick to react, slow to fall — a voice that stops should leave the
+        // field settling rather than dropping out from under itself.
+        let weight = sample > level ? 0.55 : 0.18
+        return level + (sample - level) * weight
     }
 
     static func narrate(_ decision: Decision) -> String {
