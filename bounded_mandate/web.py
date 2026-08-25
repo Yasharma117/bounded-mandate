@@ -99,7 +99,27 @@ def _settle(decision, cart_items: int) -> dict:
 
 
 def _rendered(decision, *, claimed_total_paise: int, cart_items: int) -> dict:
+    # The cart the *engine fetched*, not the one the agent described. When a
+    # verdict says "2 items outside your scope", the reader should be able to
+    # see which two rather than take the sentence on trust.
+    cart = MARKETPLACE.fetch_cart(decision.cart_id)
+    policy = POLICIES.get(decision.mandate_id)
+    items = [
+        {
+            "name": item.name,
+            "price_paise": item.price_paise,
+            "category": item.category,
+            "url": f"/m/{cart.merchant}/p/{quote(item.name)}",
+            # Why this line is a problem, if it is. Computed here because it is
+            # the policy's judgement, not the client's.
+            "off_scope": bool(policy and item.category and item.category not in policy.categories),
+            "unclassified": not item.category,
+        }
+        for item in (cart.items if cart else ())
+    ]
     return {
+        "items": items,
+        "merchant": cart.merchant if cart else None,
         "verdict": decision.verdict.value,
         "reason_code": decision.reason_code,
         "reasons": [{"code": r.code, "detail": r.detail} for r in decision.reasons],

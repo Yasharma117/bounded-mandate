@@ -31,6 +31,35 @@ struct Reason: Codable, Hashable, Sendable {
     let detail: String
 }
 
+/// One line of the cart the engine actually fetched — not the one the agent
+/// described. When a verdict says "2 items outside your scope", the reader
+/// should be able to see which two rather than take the sentence on trust.
+struct CartLine: Codable, Hashable, Sendable, Identifiable {
+    let name: String
+    let pricePaise: Int
+    let category: String
+    let url: String
+    /// The policy's judgement, computed server-side.
+    let offScope: Bool
+    let unclassified: Bool
+
+    var id: String { name }
+    var flagged: Bool { offScope || unclassified }
+
+    var note: String? {
+        if offScope { return category }
+        if unclassified { return "unclassified" }
+        return nil
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, category, url
+        case pricePaise = "price_paise"
+        case offScope = "off_scope"
+        case unclassified
+    }
+}
+
 struct Decision: Codable, Hashable, Sendable, Identifiable {
     let verdict: Verdict
     let reasonCode: String
@@ -43,19 +72,15 @@ struct Decision: Codable, Hashable, Sendable, Identifiable {
     let keyID: String?
     /// Set only once a checkout has actually captured — an order is not a payment.
     let paymentID: String?
+    /// Defaulted so older captured payloads still decode.
+    let items: [CartLine]
+    let merchant: String?
 
     var id: String { idempotencyKey + reasonCode }
+    var flagged: [CartLine] { items.filter(\.flagged) }
 
     /// The agent misreported its own cart. The engine caught it by refetching.
     var lied: Bool { claimedTotalPaise != realTotalPaise }
-
-    /// Cart ids become merchant-prefixed when the marketplace lands. Until
-    /// then there is no seller to name, and naming one anyway would be the
-    /// app asserting something the engine never told it.
-    var merchant: String? {
-        let prefix = cartID.split(separator: "_").first.map(String.init) ?? ""
-        return prefix == "cart" ? nil : prefix
-    }
 
     enum CodingKeys: String, CodingKey {
         case verdict
@@ -68,6 +93,43 @@ struct Decision: Codable, Hashable, Sendable, Identifiable {
         case orderID = "order_id"
         case keyID = "key_id"
         case paymentID = "payment_id"
+        case items, merchant
+    }
+
+    init(from decoder: any Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        verdict = try box.decode(Verdict.self, forKey: .verdict)
+        reasonCode = try box.decode(String.self, forKey: .reasonCode)
+        reasons = try box.decode([Reason].self, forKey: .reasons)
+        cartID = try box.decode(String.self, forKey: .cartID)
+        realTotalPaise = try box.decode(Int.self, forKey: .realTotalPaise)
+        claimedTotalPaise = try box.decode(Int.self, forKey: .claimedTotalPaise)
+        idempotencyKey = try box.decode(String.self, forKey: .idempotencyKey)
+        orderID = try box.decodeIfPresent(String.self, forKey: .orderID)
+        keyID = try box.decodeIfPresent(String.self, forKey: .keyID)
+        paymentID = try box.decodeIfPresent(String.self, forKey: .paymentID)
+        items = try box.decodeIfPresent([CartLine].self, forKey: .items) ?? []
+        merchant = try box.decodeIfPresent(String.self, forKey: .merchant)
+    }
+
+    init(
+        verdict: Verdict, reasonCode: String, reasons: [Reason], cartID: String,
+        realTotalPaise: Int, claimedTotalPaise: Int, idempotencyKey: String,
+        orderID: String?, keyID: String?, paymentID: String?,
+        items: [CartLine] = [], merchant: String? = nil
+    ) {
+        self.verdict = verdict
+        self.reasonCode = reasonCode
+        self.reasons = reasons
+        self.cartID = cartID
+        self.realTotalPaise = realTotalPaise
+        self.claimedTotalPaise = claimedTotalPaise
+        self.idempotencyKey = idempotencyKey
+        self.orderID = orderID
+        self.keyID = keyID
+        self.paymentID = paymentID
+        self.items = items
+        self.merchant = merchant
     }
 }
 

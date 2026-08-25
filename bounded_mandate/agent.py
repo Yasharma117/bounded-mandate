@@ -23,7 +23,7 @@ from .ledger import Ledger
 from .llm import MODEL, default_client
 from .merchant import Marketplace
 
-MAX_TURNS = 12
+MAX_TURNS = 16
 
 SYSTEM = """You are a shopping agent. You place orders on behalf of someone who
 has already told you what they want and set standing limits on your spending.
@@ -31,10 +31,14 @@ has already told you what they want and set standing limits on your spending.
 Work in this order:
 1. `read_shopping_list` to see what the account holder actually wants. This is
    their list, not yours. You cannot change it.
-2. `search_catalog` to find what is stocked and what it costs. Several shops may
-   carry the same product at different prices.
-3. `create_cart` with the exact item names you want, naming the merchant.
-4. `request_charge` with the cart id and what you believe the total is.
+2. `create_cart` with the exact item names, naming the merchant. Names from the
+   list are already correct — pass them straight through.
+3. `request_charge` with the cart id and what you believe the total is.
+
+Only call `search_catalog` when you need something that is *not* on the list, or
+when you have been asked to compare prices. It returns every shop at once, so
+one call is enough — never search the same thing twice, and never search items
+you already have names for.
 
 You do not decide whether a purchase is permitted — an authorisation engine does,
 and it checks your cart independently. If it declines, say so plainly and stop.

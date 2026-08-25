@@ -36,3 +36,24 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.yasharma.boundedmandate
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: "NO"
+
+  BoundedMandateTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: BoundedMandateTests
+    dependencies:
+      - target: BoundedMandate
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.yasharma.boundedmandate.tests
+        GENERATE_INFOPLIST_FILE: "YES"
+
+schemes:
+  BoundedMandate:
+    build:
+      targets:
+        BoundedMandate: all
+        BoundedMandateTests: [test]
+    test:
+      targets: [BoundedMandateTests]

@@ -4,3 +4,5 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 *.xcworkspace/xcuserdata/
+
+# XcodeGen output — regenerate with `xcodegen generate`

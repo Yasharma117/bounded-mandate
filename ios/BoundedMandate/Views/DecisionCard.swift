@@ -11,6 +11,13 @@ struct DecisionCard: View {
     @Environment(\.theme) private var theme
     let decision: Decision
 
+    /// The cart opens by itself when something in it is the reason for the
+    /// verdict — that is the moment the reader needs to see the lines, and
+    /// making them tap for it would withhold the answer to the question the
+    /// card just raised.
+    @State private var showingCart: Bool?
+    private var cartOpen: Bool { showingCart ?? !decision.flagged.isEmpty }
+
     private var tint: Color { theme.color(for: decision.verdict) }
 
     var body: some View {
@@ -53,6 +60,11 @@ struct DecisionCard: View {
                 }
                 .padding(18)
 
+                if !decision.items.isEmpty {
+                    Divider().overlay(theme.borderSubtle)
+                    cart
+                }
+
                 Divider().overlay(theme.borderSubtle)
 
                 VStack(spacing: 9) {
@@ -73,6 +85,60 @@ struct DecisionCard: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
             }
+        }
+    }
+
+    @ViewBuilder private var cart: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.28)) { showingCart = !cartOpen }
+        } label: {
+            HStack(spacing: 6) {
+                Text(
+                    decision.flagged.isEmpty
+                        ? "\(decision.items.count) items"
+                        : "\(decision.flagged.count) of \(decision.items.count) items flagged"
+                )
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(decision.flagged.isEmpty ? theme.textMuted : tint)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.textMuted)
+                    .rotationEffect(.degrees(cartOpen ? 180 : 0))
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+            .frame(minHeight: 44)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+
+        if cartOpen {
+            VStack(spacing: 0) {
+                ForEach(decision.items) { line in
+                    HStack(spacing: 10) {
+                        Text(line.name)
+                            .font(.system(size: 14))
+                            .foregroundStyle(line.flagged ? theme.textNormal : theme.textSubtle)
+                            .lineLimit(2)
+                        if let note = line.note {
+                            Text(note)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(tint)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(tint.opacity(0.14), in: .capsule)
+                        }
+                        Spacer(minLength: 8)
+                        Text(rupees(line.pricePaise))
+                            .font(.system(size: 14))
+                            .monospacedDigit()
+                            .foregroundStyle(line.flagged ? theme.textNormal : theme.textMuted)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 6)
+                }
+            }
+            .padding(.bottom, 8)
         }
     }
 }
