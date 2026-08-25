@@ -93,6 +93,9 @@ struct VoiceAgentView: View {
                 .padding(16)
             }
             .scrollIndicators(.hidden)
+            // The header floats over this, so content needs room to pass
+            // beneath it rather than being clipped by it.
+            .contentMargins(.top, 12, for: .scrollContent)
             .onChange(of: session.turns.count) {
                 withAnimation { scroller.scrollTo("end", anchor: .bottom) }
             }

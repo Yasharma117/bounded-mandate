@@ -38,15 +38,25 @@ final class VoiceSession {
     /// laid out for a screen you are not holding close.
     private(set) var turns: [Message] = []
 
-    /// Stop after this much quiet. Long enough to think mid-sentence, short
-    /// enough that finishing a sentence ends your turn.
+    /// Stop after this much quiet **once you have actually said something**.
+    /// Long enough to think mid-sentence, short enough that finishing one ends
+    /// your turn.
     private let silenceSeconds: TimeInterval = 1.4
     private let silenceThreshold: Float = -38
+    /// How long to wait for a first word before admitting it cannot hear you.
+    /// Silence forever is indistinguishable from a broken microphone, and the
+    /// screen should not make you guess which it is.
+    private let patienceSeconds: TimeInterval = 12
 
     private var recorder: AVAudioRecorder?
     private var player: AVAudioPlayer?
     private var meter: Task<Void, Never>?
     private var quietSince: Date?
+    /// Whether this turn has heard speech yet. Without it the silence timer
+    /// starts on the quiet *before* you speak and ends the turn about a second
+    /// after the microphone opens — which is a turn of empty room, every time.
+    private var heardSpeech = false
+    private var openedMic: Date?
     private var running = false
     /// Which service speaks. Changed live, so both can be judged by ear.
     private var provider: String?
@@ -103,6 +113,8 @@ final class VoiceSession {
             self.recorder = recorder
             phase = .listening
             quietSince = nil
+            heardSpeech = false
+            openedMic = Date()
             startMetering()
         } catch {
             problem = error.localizedDescription
@@ -142,9 +154,21 @@ final class VoiceSession {
         level = normalised * normalised
 
         guard power < silenceThreshold else {
+            heardSpeech = true
             quietSince = nil
             return false
         }
+
+        // Nothing said yet: this is the pause before you start, not the pause
+        // after you finish. Waiting is the correct behaviour — up to a point.
+        guard heardSpeech else {
+            if let opened = openedMic, Date().timeIntervalSince(opened) >= patienceSeconds {
+                problem = "I can't hear anything. Check the microphone, then tap to try again."
+                stop()
+            }
+            return false
+        }
+
         let since = quietSince ?? Date()
         quietSince = since
         return Date().timeIntervalSince(since) >= silenceSeconds

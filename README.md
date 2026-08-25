@@ -373,6 +373,13 @@ it to the agent, speak the verdict, listen again. Nothing is pressed twice. End
 of turn is detected from the input meter — 1.4 s below −38 dB — which is enough
 to think mid-sentence and short enough that finishing one ends your turn.
 
+**That timer only starts once you have actually said something.** Counting from
+the first quiet sample counts the pause *before* you speak, which ends the turn
+about a second after the microphone opens and uploads a second and a half of
+empty room, every time. If no first word arrives within twelve seconds the
+screen says so, because silence forever and a broken microphone look identical
+and the user should not have to guess which they are looking at.
+
 The screen starts almost empty, because before you have said anything there is
 nothing true to show. What it does instead is *react*: the `MeshGradient` is
 driven by live audio level — your voice while it listens, the agent's while it
