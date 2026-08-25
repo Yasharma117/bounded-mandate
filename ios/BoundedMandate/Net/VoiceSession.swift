@@ -9,6 +9,11 @@ import SwiftUI
 /// the difference between a microphone button and a voice mode, and it is the
 /// only reason a hands-free grocery order is a believable thing to demo.
 ///
+/// Turns land in the **same thread** the typed conversation uses. Voice is a
+/// state of the conversation, not a separate screen: a duplicate transcript
+/// would need its own layout for cards, and the first thing that layout did was
+/// clip them.
+///
 /// Speech is still an **utterance**. It reaches the agent with exactly the
 /// standing that typing has, and the engine decides either way — a voice channel
 /// widens what can be *said*, never what will be *authorised*.
@@ -34,9 +39,11 @@ final class VoiceSession {
     /// 0…1, smoothed. Drives the backdrop, so the screen reacts to the room.
     private(set) var level: Double = 0
     private(set) var problem: String?
-    /// Voice mode keeps its own turns so the transcript and the cards can be
-    /// laid out for a screen you are not holding close.
-    private(set) var turns: [Message] = []
+
+    /// Where turns go. The thread is the conversation; this only speaks into it.
+    private unowned let thread: Thread
+
+    init(thread: Thread) { self.thread = thread }
 
     /// Stop after this much quiet **once you have actually said something**.
     /// Long enough to think mid-sentence, short enough that finishing one ends
@@ -101,7 +108,7 @@ final class VoiceSession {
             try AVAudioSession.sharedInstance().setActive(true)
 
             let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("turn-\(turns.count).m4a")
+                .appendingPathComponent("turn-\(UUID().uuidString).m4a")
             let recorder = try AVAudioRecorder(url: url, settings: [
                 AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
                 AVSampleRateKey: 44_100,
@@ -198,14 +205,15 @@ final class VoiceSession {
                 await listen()
                 return
             }
-            turns.append(.said(id: "u-\(UUID().uuidString)", from: .user, text: heard))
+            let key = UUID().uuidString
+            thread.append(.said(id: "u-\(key)", from: .user, text: heard))
 
             let result = try await Engine.runAgent(heard)
             let spoken = result.decision.map(Self.narrate) ?? result.said
             // Cards arrive as the conversation earns them. Spoken numbers are
             // the thing a voice interface is worst at, so prices land on screen
             // rather than only in the air.
-            turns.append(contentsOf: Message.from(result, spoken: spoken, key: UUID().uuidString))
+            thread.append(contentsOf: Message.from(result, spoken: spoken, key: key))
             await say(spoken)
         } catch is CancellationError {
             return  // the session was stopped mid-turn; not a fault to report

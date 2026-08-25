@@ -59,6 +59,11 @@ final class Thread {
     ]
     var busy = false
 
+    /// Voice speaks into the same thread typing does. There is one
+    /// conversation; the microphone is a way into it, not a place of its own.
+    func append(_ message: Message) { messages.append(message) }
+    func append(contentsOf added: [Message]) { messages.append(contentsOf: added) }
+
     /// What the agent says once the engine has ruled. The verdict leads.
     private func narrate(_ decision: Decision) -> String {
         switch decision.verdict {
@@ -102,8 +107,11 @@ struct ThreadView: View {
     @FocusState private var writing: Bool
     // DEV: -BMOpenList YES opens straight to the list.
     @State private var showingList = UserDefaults.standard.bool(forKey: "BMOpenList")
-    // DEV: -BMOpenVoice YES opens straight into voice mode.
-    @State private var showingVoice = UserDefaults.standard.bool(forKey: "BMOpenVoice")
+    // DEV: -BMOpenVoice YES starts in voice mode.
+    @State private var voice: VoiceSession?
+    @Namespace private var glass
+    /// One bump per state change, which is what the ripple listens to.
+    @State private var pulse = 0
 
     var body: some View {
         NavigationStack {
@@ -132,7 +140,12 @@ struct ThreadView: View {
                     withAnimation { scroller.scrollTo("end", anchor: .bottom) }
                 }
             }
-            .background(Backdrop())
+            .background(
+                ZStack {
+                    Backdrop(intensity: voice?.level ?? 0, vivid: voice != nil)
+                    Ripple(trigger: pulse, color: theme.primary)
+                }
+            )
             .navigationTitle("Bounded Mandate")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -143,10 +156,13 @@ struct ThreadView: View {
                 }
             }
             .sheet(isPresented: $showingList) { ListSheet() }
-            .fullScreenCover(isPresented: $showingVoice) { VoiceAgentView() }
+            // One ring per hand-over: you stopped, it is thinking, it is
+            // speaking. Voice has no cursor, so the screen has to say so.
+            .onChange(of: voice?.phase) { pulse += 1 }
             // DEV: -BMAsk "..." sends one message on launch, so a whole turn
             // can be screenshotted without a keyboard.
             .task {
+                if UserDefaults.standard.bool(forKey: "BMOpenVoice") { startTalking() }
                 if let opening = UserDefaults.standard.string(forKey: "BMAsk") {
                     await thread.send(opening)
                 }
@@ -155,73 +171,148 @@ struct ThreadView: View {
         }
     }
 
-    /// Pinned to the bottom. Typing and talking are separate doors now: the
-    /// field is for typing, and the button beside it opens a conversation.
+    /// Pinned to the bottom.
+    ///
+    /// Voice is a *state of this bar*, not another screen. Tapping the waveform
+    /// morphs the field into an orb and the thread stays exactly where it is —
+    /// which is the point, because the cards a conversation produces already
+    /// have a home here, and the duplicate transcript that used to exist had to
+    /// invent a worse one.
     private var composer: some View {
         VStack(spacing: 10) {
-            // Their own container, so the chips blend into each other as they
-            // scroll without also swallowing the input bar below.
-            GlassEffectContainer(spacing: 12) {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(Opener.all) { opener in
-                            Button(opener.label) {
-                                Task {
-                                    await thread.send(
-                                        opener.text, adversarial: opener.adversarial)
-                                }
-                            }
-                            .buttonStyle(.glass)
-                            .font(.system(size: 13))
-                            .tint(theme.textNormal)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .scrollIndicators(.hidden)
+            if voice == nil {
+                openers
+            } else if let problem = voice?.problem {
+                Text(problem)
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.negative)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            } else {
+                Text(voice?.phase.label ?? "")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(theme.textSubtle)
+                    .contentTransition(.opacity)
             }
 
-            HStack(spacing: 10) {
+            GlassEffectContainer(spacing: 22) {
                 HStack(spacing: 10) {
-                    TextField("Ask Bounded Mandate anything…", text: $draft)
-                        .focused($writing)
-                        .submitLabel(.send)
-                        .onSubmit(submit)
-                        .disabled(thread.busy)
-
-                    if !draft.trimmingCharacters(in: .whitespaces).isEmpty {
-                        Button(action: submit) {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 22))
-                                .foregroundStyle(theme.primary)
-                                .frame(width: 40, height: 40)
-                                .contentShape(.rect)
-                        }
+                    if let voice {
+                        orb(voice)
+                    } else {
+                        field
                     }
                 }
-                .padding(.leading, 18)
-                .padding(.trailing, draft.trimmingCharacters(in: .whitespaces).isEmpty ? 18 : 6)
-                .padding(.vertical, 6)
-                .frame(minHeight: 52)
-                .glassEffect(.regular.interactive(), in: .capsule)
-
-                // Out of the field and beside it, because it does not send this
-                // message — it opens a different way of talking altogether, and
-                // a control sitting inside the text field would promise
-                // otherwise.
-                Button { showingVoice = true } label: {
-                    Image(systemName: "waveform")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(theme.primary)
-                        .frame(width: 52, height: 52)
-                        .contentShape(.circle)
-                }
-                .glassEffect(.regular.interactive(), in: .circle)
-                .accessibilityLabel("Talk to the agent")
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
         }
         .padding(.bottom, 8)
+        .animation(.spring(duration: 0.45, bounce: 0.18), value: voice == nil)
+    }
+
+    private var openers: some View {
+        GlassEffectContainer(spacing: 12) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(Opener.all) { opener in
+                        Button(opener.label) {
+                            Task {
+                                await thread.send(opener.text, adversarial: opener.adversarial)
+                            }
+                        }
+                        .buttonStyle(.glass)
+                        .font(.system(size: 13))
+                        .tint(theme.textNormal)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    private var field: some View {
+        Group {
+            HStack(spacing: 10) {
+                TextField("Ask Bounded Mandate anything…", text: $draft)
+                    .focused($writing)
+                    .submitLabel(.send)
+                    .onSubmit(submit)
+                    .disabled(thread.busy)
+
+                if !draft.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Button(action: submit) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(theme.primary)
+                            .frame(width: 40, height: 40)
+                            .contentShape(.rect)
+                    }
+                }
+            }
+            .padding(.leading, 18)
+            .padding(.trailing, draft.trimmingCharacters(in: .whitespaces).isEmpty ? 18 : 6)
+            .padding(.vertical, 6)
+            .frame(minHeight: 52)
+            .glassEffect(.regular.interactive(), in: .capsule)
+            .glassEffectID("composer", in: glass)
+
+            Button { startTalking() } label: {
+                Image(systemName: "waveform")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(theme.primary)
+                    .frame(width: 52, height: 52)
+                    .contentShape(.circle)
+            }
+            .glassEffect(.regular.interactive(), in: .circle)
+            .glassEffectID("mic", in: glass)
+            .accessibilityLabel("Talk to the agent")
+        }
+    }
+
+    /// The field, grown. Same glass, same identity — so it stretches into place
+    /// rather than one control vanishing and another appearing.
+    private func orb(_ session: VoiceSession) -> some View {
+        Button { stopTalking() } label: {
+            ZStack {
+                Circle()
+                    .fill(theme.primary.opacity(0.14))
+                    .scaleEffect(1 + session.level * 0.42)
+                Image(systemName: symbol(for: session.phase))
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(theme.textNormal)
+                    .symbolEffect(.variableColor, isActive: session.phase == .thinking)
+            }
+            .frame(width: 96, height: 96)
+            .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
+        .glassEffectID("composer", in: glass)
+        .animation(.easeOut(duration: 0.12), value: session.level)
+        .accessibilityLabel("Stop talking")
+    }
+
+    private func symbol(for phase: VoiceSession.Phase) -> String {
+        switch phase {
+        case .idle, .listening: "waveform"
+        case .thinking: "ellipsis"
+        case .speaking: "speaker.wave.2.fill"
+        }
+    }
+
+    private func startTalking() {
+        writing = false
+        let session = VoiceSession(thread: thread)
+        voice = session
+        pulse += 1
+        Task { await session.start() }
+    }
+
+    private func stopTalking() {
+        voice?.stop()
+        voice = nil
+        pulse += 1
     }
 
     private func submit() {

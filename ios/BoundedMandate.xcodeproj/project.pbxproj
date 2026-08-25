@@ -16,7 +16,7 @@
 		2EAA76FA814C1B7745FC0E41 /* MandateCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B134C0D0247EF8BD2C49D1E9 /* MandateCard.swift */; };
 		38847C894E60C2D51CDA457C /* turn_escalate.json in Resources */ = {isa = PBXBuildFile; fileRef = C9736444AF6DBCB412CF4E12 /* turn_escalate.json */; };
 		476F81A3B192453D8ECA466D /* Backdrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F3FB64D32E47048DB096422 /* Backdrop.swift */; };
-		506EEE8BA84BCEFD82B7760D /* VoiceAgentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E796A6FFF3ED393DC9F34635 /* VoiceAgentView.swift */; };
+		48F5D8818E08FBE4ACD83A38 /* Ripple.swift in Sources */ = {isa = PBXBuildFile; fileRef = 203B007F07FFB845384BD2D8 /* Ripple.swift */; };
 		61E773A70F15F85EB79EB42F /* offers_category_blocked.json in Resources */ = {isa = PBXBuildFile; fileRef = 547E104CAEC12ADCF7194C89 /* offers_category_blocked.json */; };
 		6FA94D52184FABEF368C93F3 /* offers.json in Resources */ = {isa = PBXBuildFile; fileRef = 43F2DF620B35C624AAC1C692 /* offers.json */; };
 		6FAC6DEBA73B5518D401A4E7 /* PayloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF8722A4C7F67E1C3AF706A /* PayloadTests.swift */; };
@@ -50,6 +50,7 @@
 		1EA33E9B6CFE9D623F014033 /* OffersCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffersCard.swift; sourceTree = "<group>"; };
 		1EF8722A4C7F67E1C3AF706A /* PayloadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadTests.swift; sourceTree = "<group>"; };
 		1F3FB64D32E47048DB096422 /* Backdrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backdrop.swift; sourceTree = "<group>"; };
+		203B007F07FFB845384BD2D8 /* Ripple.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ripple.swift; sourceTree = "<group>"; };
 		309C0A10C6372B326D0D6D3F /* DecisionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecisionCard.swift; sourceTree = "<group>"; };
 		43F2DF620B35C624AAC1C692 /* offers.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = offers.json; sourceTree = "<group>"; };
 		461AAC29A571034CD100B1F6 /* Decision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Decision.swift; sourceTree = "<group>"; };
@@ -69,7 +70,6 @@
 		C505FE655A597E914113A48C /* Bubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bubble.swift; sourceTree = "<group>"; };
 		C9736444AF6DBCB412CF4E12 /* turn_escalate.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = turn_escalate.json; sourceTree = "<group>"; };
 		E2FE80D8D802D5B02E2DF3C0 /* Surfaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Surfaces.swift; sourceTree = "<group>"; };
-		E796A6FFF3ED393DC9F34635 /* VoiceAgentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentView.swift; sourceTree = "<group>"; };
 		E850AA83E9DF20D02B3CD3B9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E9774A61A14E72CF37180810 /* Voice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voice.swift; sourceTree = "<group>"; };
 		FBE069DC68F919F6052214CE /* turn_deny.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = turn_deny.json; sourceTree = "<group>"; };
@@ -99,10 +99,10 @@
 				5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */,
 				B134C0D0247EF8BD2C49D1E9 /* MandateCard.swift */,
 				1EA33E9B6CFE9D623F014033 /* OffersCard.swift */,
+				203B007F07FFB845384BD2D8 /* Ripple.swift */,
 				B62812298D584BB58C041C20 /* ShoppingListCard.swift */,
 				E2FE80D8D802D5B02E2DF3C0 /* Surfaces.swift */,
 				475F8843619C3FBCD0806282 /* ThreadView.swift */,
-				E796A6FFF3ED393DC9F34635 /* VoiceAgentView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -282,12 +282,12 @@
 				22254A44218ED4D318B4DCD6 /* ListSheet.swift in Sources */,
 				2EAA76FA814C1B7745FC0E41 /* MandateCard.swift in Sources */,
 				E1F4E838FDCC3F49630592FB /* OffersCard.swift in Sources */,
+				48F5D8818E08FBE4ACD83A38 /* Ripple.swift in Sources */,
 				D1E861CE4594428BD4513065 /* ShoppingListCard.swift in Sources */,
 				B3CCBE7DE4AF8D06C7DF3D2D /* Surfaces.swift in Sources */,
 				91914D4C0A12FBCABFFF6CB5 /* ThreadView.swift in Sources */,
 				D400D29C8D8E0A2DF378D6FB /* Tokens.swift in Sources */,
 				1014689A9ED39A18BCF9CD06 /* Voice.swift in Sources */,
-				506EEE8BA84BCEFD82B7760D /* VoiceAgentView.swift in Sources */,
 				ADE569289D879E5AE7AF9EE8 /* VoiceSession.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
