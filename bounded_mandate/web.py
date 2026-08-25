@@ -16,8 +16,11 @@ build-time environment variable.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import os
 from dataclasses import replace
+from datetime import UTC, date, datetime
 from html import escape
 from pathlib import Path
 from urllib.parse import quote
@@ -27,7 +30,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .agent import ADVERSARIAL_SYSTEM, BuyerAgent
-from .basket import ShoppingList, seed_lists
+from .basket import ListKind, ShoppingList, seed_lists
 from .compiler import compile_mandate
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import Ledger
@@ -36,7 +39,21 @@ from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, S
 from .voice import SPEAKERS, TTS_PROVIDER, VoiceUnavailable, speak, transcribe
 from .wording import summary, title
 
-app = FastAPI(title="Bounded Mandate", docs_url="/api/docs")
+
+@contextlib.asynccontextmanager
+async def _lifespan(_: FastAPI):
+    """Run the scheduler for as long as the app is up, if it is switched on."""
+    task = asyncio.create_task(_scheduler()) if os.environ.get("BM_SCHEDULER") == "1" else None
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+app = FastAPI(title="Bounded Mandate", docs_url="/api/docs", lifespan=_lifespan)
 
 STATIC = Path(__file__).parent / "static"
 
@@ -479,6 +496,7 @@ def _list_rows(shopping: ShoppingList) -> dict:
         for name in shopping.item_names
     ]
     priced = [i["price_paise"] for i in items if i["price_paise"] is not None]
+    due_at = shopping.next_due()
     return {
         "list_id": shopping.list_id,
         "name": shopping.name,
@@ -487,7 +505,117 @@ def _list_rows(shopping: ShoppingList) -> dict:
         "total_paise": sum(priced),
         "cap_paise": policy.per_txn_max_paise,
         "unstocked": [i["name"] for i in items if i["price_paise"] is None],
+        "kind": shopping.kind.value,
+        "every_days": shopping.every_days,
+        "run_on": shopping.run_on.isoformat() if shopping.run_on else None,
+        "paused": shopping.paused,
+        "spent": shopping.spent,
+        "last_run_at": shopping.last_run_at.isoformat() if shopping.last_run_at else None,
+        "next_due_at": due_at.isoformat() if due_at else None,
+        "due": shopping.due(),
+        "schedule": _schedule_words(shopping),
     }
+
+
+def _schedule_words(shopping: ShoppingList) -> str:
+    """When this runs, said the way a person would say it."""
+    if shopping.paused:
+        return "Paused"
+    if shopping.kind is ListKind.ONCE:
+        if shopping.spent:
+            return "Ordered once, done"
+        if shopping.run_on is None:
+            return "One-off, no date set"
+        return f"Once, on {shopping.run_on.strftime('%-d %b')}"
+    if shopping.every_days is None:
+        return "Only when you ask"
+    if shopping.every_days == 1:
+        return "Every day"
+    return f"Every {shopping.every_days} days"
+
+
+class NewList(BaseModel):
+    name: str = Field(min_length=1)
+    item_names: list[str] = Field(default_factory=list)
+    kind: str = Field(default="standing", description="`standing` or `once`")
+    every_days: int | None = Field(default=None, ge=0, le=365)
+    run_on: date | None = None
+
+
+class Schedule(BaseModel):
+    """Every field optional — a schedule edit should not have to restate a list."""
+
+    every_days: int | None = Field(default=None, ge=0, le=365)
+    run_on: date | None = None
+    paused: bool | None = None
+
+
+@app.get("/api/lists")
+def all_lists() -> dict:
+    """Every list the user keeps, soonest-due first."""
+    rows = [_list_rows(shopping) for shopping in LISTS.values()]
+    rows.sort(key=lambda row: (row["next_due_at"] is None, row["next_due_at"] or ""))
+    return {"lists": rows}
+
+
+@app.post("/api/lists")
+def create_list(body: NewList) -> dict:
+    """A new list. A user action — the agent has no tool that reaches this."""
+    try:
+        kind = ListKind(body.kind)
+    except ValueError as exc:
+        raise HTTPException(400, "kind must be `standing` or `once`") from exc
+    unknown = [n for n in body.item_names if n not in MARKETPLACE["instamart"].catalog]
+    if unknown:
+        raise HTTPException(400, f"not stocked: {', '.join(unknown)}")
+
+    list_id = _fresh_id(body.name)
+    LISTS[list_id] = ShoppingList(
+        list_id=list_id,
+        name=body.name,
+        item_names=tuple(body.item_names),
+        kind=kind,
+        every_days=body.every_days,
+        run_on=body.run_on,
+    )
+    return _list_rows(LISTS[list_id])
+
+
+def _fresh_id(name: str) -> str:
+    stem = "".join(c if c.isalnum() else "-" for c in name.lower()).strip("-") or "list"
+    if stem not in LISTS:
+        return stem
+    n = 2
+    while f"{stem}-{n}" in LISTS:
+        n += 1
+    return f"{stem}-{n}"
+
+
+@app.delete("/api/list/{list_id}")
+def delete_list(list_id: str) -> dict:
+    if LISTS.pop(list_id, None) is None:
+        raise HTTPException(404, "no such list")
+    return {"deleted": list_id}
+
+
+@app.put("/api/list/{list_id}/schedule")
+def set_schedule(list_id: str, body: Schedule) -> dict:
+    """Change *when*, without touching *what*.
+
+    A cadence cannot widen authority: the engine never reads a schedule, so a
+    list set to run hourly under a mandate permitting one order every four days
+    is simply refused three times a day.
+    """
+    shopping = LISTS.get(list_id)
+    if shopping is None:
+        raise HTTPException(404, "no such list")
+    LISTS[list_id] = replace(
+        shopping,
+        every_days=body.every_days if body.every_days is not None else shopping.every_days,
+        run_on=body.run_on or shopping.run_on,
+        paused=body.paused if body.paused is not None else shopping.paused,
+    )
+    return _list_rows(LISTS[list_id])
 
 
 @app.get("/api/list/{list_id}")
@@ -541,3 +669,73 @@ def product_page(merchant: str, name: str) -> str:
         f"<p style='font-size:1.5rem;font-weight:600'>₹{item.price_paise / 100:,.0f}</p>"
         f"<p style='color:#666'>{escape(item.category or 'uncategorised')}</p>"
     )
+
+
+# --- the scheduler ----------------------------------------------------------
+#
+# The product's whole claim is that nobody is present. A list with a cadence
+# should therefore go out on its own, and this is the loop that does it.
+#
+# Off unless `BM_SCHEDULER=1`, because a background task that runs an agent has
+# no business starting itself inside a test suite. On for the demo, where the
+# point is that nothing was touched.
+#
+# It cannot widen anything. It picks due lists and proposes them; the engine
+# decides exactly as it would for a proposal a human triggered, and a list set
+# to run hourly under a once-every-four-days mandate is simply refused three
+# times a day.
+
+SCHEDULER_TICK = float(os.environ.get("BM_SCHEDULER_TICK", "20"))
+
+
+def run_due_lists(now: datetime | None = None) -> list[dict]:
+    """Propose every list that is due. Returns what the engine made of each."""
+    now = now or datetime.now(UTC)
+    out: list[dict] = []
+    for list_id, shopping in list(LISTS.items()):
+        if not shopping.due(now):
+            continue
+        try:
+            cart = MARKETPLACE.create_cart(
+                list(shopping.item_names), delivery_address=HOME, merchant="instamart"
+            )
+        except (UnknownMerchant, UnknownItem) as exc:
+            out.append({"list_id": list_id, "error": str(exc.args[0])})
+            continue
+
+        decision = decide(
+            Proposal("mdt_demo", cart.cart_id, cart.total_paise),
+            policies=POLICIES,
+            adapter=MARKETPLACE,
+            ledger=LEDGER,
+        )
+        # Marked as run whatever the verdict — a refused attempt still happened,
+        # and re-proposing the same basket every tick would look like probing.
+        LISTS[list_id] = shopping.ran(now)
+        out.append(
+            {
+                "list_id": list_id,
+                "name": shopping.name,
+                **_rendered(
+                    decision,
+                    claimed_total_paise=cart.total_paise,
+                    cart_items=len(cart.items),
+                ),
+            }
+        )
+    return out
+
+
+@app.post("/api/lists/run-due")
+def run_due_now() -> dict:
+    """Fire the scheduler once, by hand. What the timer does, on demand."""
+    return {"ran": run_due_lists()}
+
+
+async def _scheduler() -> None:
+    while True:
+        await asyncio.sleep(SCHEDULER_TICK)
+        try:
+            await asyncio.to_thread(run_due_lists)
+        except Exception:  # a bad tick must not kill the loop
+            pass

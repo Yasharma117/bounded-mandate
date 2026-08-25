@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -470,3 +471,103 @@ def test_the_card_says_what_happened_to_the_money_without_saying_rail(client, mo
     # Honest about the gap: an order exists, but nothing has been captured.
     assert allowed["settlement"] == "Order placed, not yet paid"
     assert "rail" not in allowed["settlement"].lower()
+
+
+# --- many lists, and when they run ------------------------------------------
+
+
+def test_the_user_keeps_several_lists_soonest_first(client):
+    rows = client.get("/api/lists").json()["lists"]
+    assert len(rows) >= 2
+    due = [row["next_due_at"] for row in rows if row["next_due_at"]]
+    assert due == sorted(due), "the one that runs next should be at the top"
+    assert all(row["schedule"] for row in rows), "every list says when it runs"
+
+
+def test_a_one_time_list_can_be_created_and_reads_as_one_off(client):
+    body = client.post(
+        "/api/lists",
+        json={
+            "name": "Diwali sweets",
+            "item_names": ["Cow ghee 500ml", "Bananas 1kg"],
+            "kind": "once",
+            "run_on": "2026-11-08",
+        },
+    ).json()
+    assert body["kind"] == "once"
+    assert body["schedule"] == "Once, on 8 Nov"
+    assert body["total_paise"] == 40_000
+    # And it joins the others rather than replacing anything.
+    assert len(client.get("/api/lists").json()["lists"]) >= 3
+
+
+def test_creating_a_list_refuses_items_no_shop_stocks(client):
+    response = client.post("/api/lists", json={"name": "Dream", "item_names": ["Ferrari"]})
+    assert response.status_code == 400
+
+
+def test_two_lists_with_the_same_name_get_their_own_ids(client):
+    first = client.post("/api/lists", json={"name": "Party"}).json()
+    second = client.post("/api/lists", json={"name": "Party"}).json()
+    assert first["list_id"] != second["list_id"]
+
+
+def test_a_schedule_can_be_changed_without_restating_the_list(client):
+    before = client.get("/api/list/usual").json()
+    after = client.put("/api/list/usual/schedule", json={"every_days": 7}).json()
+    assert after["every_days"] == 7
+    assert after["schedule"] == "Every 7 days"
+    assert [i["name"] for i in after["items"]] == [i["name"] for i in before["items"]]
+
+
+def test_pausing_a_list_stops_it_being_due_without_deleting_it(client):
+    paused = client.put("/api/list/usual/schedule", json={"paused": True}).json()
+    assert paused["paused"] is True
+    assert paused["next_due_at"] is None
+    assert paused["schedule"] == "Paused"
+    assert paused["items"], "a paused list keeps its contents"
+
+
+def test_a_list_can_be_deleted(client):
+    assert client.delete("/api/list/breakfast").status_code == 200
+    assert client.get("/api/list/breakfast").status_code == 404
+    assert client.delete("/api/list/breakfast").status_code == 404
+
+
+# --- the scheduler ----------------------------------------------------------
+
+
+def test_a_due_list_goes_out_on_its_own(client):
+    """The product's claim is that nobody is present. This is that, once."""
+    ran = client.post("/api/lists/run-due").json()["ran"]
+    assert ran, "nothing fired, though the seeded lists have never run"
+    assert all("verdict" in row for row in ran)
+    # And it does not fire the same basket again on the next tick.
+    assert client.post("/api/lists/run-due").json()["ran"] == []
+
+
+def test_the_scheduler_cannot_widen_what_the_engine_permits(client):
+    """A list set to run every day under a mandate permitting one order every
+    four days is refused, daily. The scheduler proposes; it never decides."""
+    client.put("/api/list/breakfast/schedule", json={"paused": True})
+    client.put("/api/list/usual/schedule", json={"every_days": 0})
+
+    verdicts = []
+    for _ in range(3):
+        for row in client.post("/api/lists/run-due").json()["ran"]:
+            verdicts.append(row["verdict"])
+        # Pretend a tick passed by clearing the last run.
+        web.LISTS["usual"] = replace(web.LISTS["usual"], last_run_at=None)
+
+    assert verdicts, "the list should have been attempted"
+    assert verdicts[0] == "ALLOW"
+    assert any(v != "ALLOW" for v in verdicts[1:]), "the cap should have stopped it"
+
+
+def test_the_scheduler_is_off_unless_it_is_switched_on(monkeypatch):
+    """A background task that runs an agent has no business starting itself
+    inside a test suite, or on someone's laptop by surprise."""
+    monkeypatch.delenv("BM_SCHEDULER", raising=False)
+    with TestClient(web.app) as running:
+        running.get("/api/lists")
+        assert not hasattr(running.app.state, "scheduler")
