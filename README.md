@@ -274,51 +274,78 @@ perfectly ordinary groceries to a stranger's address.
 
 ## The app
 
-The client is an Expo / React Native app in [`mobile/`](mobile), targeting iOS
-26 with Liquid Glass. It is a thread: you say what you want, the agent shops,
-and the engine's verdict lands in the conversation as a card.
+The client is a native SwiftUI app in [`ios/`](ios), targeting iOS 26. It is a
+thread: you say what you want, the agent shops, and the engine's verdict lands
+in the conversation as a card.
 
 The app holds **no policy, no Razorpay key, and no ElevenLabs key**. It renders
 verdicts it did not compute and cannot appeal. Decompiling the bundle yields
-nothing, because there is nothing in it — every credential lives in the server
-process, and the phone talks only to the engine's host.
+nothing, because there is nothing in it — every credential lives in the engine
+process, and the phone talks only to the engine's host, including for voice.
 
 ```bash
 set -a; . ./.env; set +a
 uv run uvicorn bounded_mandate.web:app --host 0.0.0.0 --port 8117   # the engine
-cd mobile && npx expo start                                          # the app
+
+cd ios && xcodegen generate && open BoundedMandate.xcodeproj        # the app
 ```
 
-`API_BASE` is derived from the Expo dev-server host, so the simulator and a
-physical device on the same LAN both find the engine with no configuration.
+`Engine.baseURL` defaults to `http://127.0.0.1:8117`, which the simulator
+reaches directly; override it with a `BMEngineHost` user default for a device.
+
+### Why SwiftUI and not React Native
+
+The first client was Expo. It was replaced once it became clear the design
+required Liquid Glass, which is a first-party SwiftUI API — `.glassEffect()`,
+`GlassEffectContainer`, `glassEffectID`. Through the React Native wrapper the
+container would not composite across a `ScrollView`, glass had to be given a
+hand-built backdrop to refract, and cards needed manual borders and shadows to
+avoid dissolving into the page. All of that is one modifier here.
+
+The swap cost seven files and no server code. The engine, ledger, compiler, NIM
+binding, Razorpay integration, buyer agent and both voice routes were untouched,
+because the client only ever spoke HTTP — the fourth time that has now been
+demonstrated rather than asserted.
 
 ### One card for four verdicts
 
-A receipt and a refusal are the same component wearing different colours. That
-is the honest shape: the engine ran the same checks either way, and the reader
-should be able to parse both the same way. When the agent misreports its own
-cart the card shows the real total in the headline and the claimed total
-beneath it, in the refusal colour.
+A receipt and a refusal are the same view wearing different colours. That is the
+honest shape: the engine ran the same checks either way, and the reader should
+be able to parse both the same way. When the agent misreports its own cart the
+card shows the real total in the headline and the claimed total beneath it, in
+the refusal colour.
+
+### Colour is Razorpay's, not invented
+
+`Theme/Tokens.swift` carries Blade's own values, resolved through Blade's
+semantic mapping in `packages/blade/src/tokens/theme/bladeTheme.ts` —
+`surface.background.gray.*`, `surface.text.gray.*`, the `interactive` primary,
+and the four `feedback` hues. Each token names the Blade scale step it came
+from, so it stays diffable against upstream. Light and dark both.
+
+`ALLOW` is Razorpay blue rather than Blade's `positive` green: the brand colour
+is the colour of *authorised*, which gives it a job instead of spending it on
+furniture. The other three keep Blade's feedback semantics — `orchid` for
+CLARIFY, `cider` for ESCALATE, `crimson` for DENY.
 
 ### Voice
 
 Speech is an **utterance**, not an authority. A transcript reaches the agent
 with exactly the standing that typing has, and there is no verdict reachable by
 voice that is not reachable by text — so widening the input channel does not
-widen what the engine will approve. `POST /api/voice/transcribe` takes raw
-audio bytes and returns text; it touches neither the ledger nor the gateway,
-and a test asserts that.
+widen what the engine will approve. `POST /api/voice/transcribe` takes raw audio
+bytes and returns text; it touches neither the ledger nor the gateway, and a
+test asserts that.
 
 Audio round-trips through the engine's host rather than going to ElevenLabs
 directly, for the same reason the Razorpay secret does: a key shipped inside an
 app is a published key.
 
-Text-to-speech failures are swallowed on purpose. Losing audio should never
-cost the user a decision they can already read on screen.
+Text-to-speech failures are swallowed on purpose. Losing audio should never cost
+the user a decision they can already read on screen.
 
 ```bash
 ELEVENLABS_API_KEY=sk_...          # the key, not the key ID beside it
-# ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
 ```
 
 Unset, the routes return `503` and the app stays text-only.
@@ -518,9 +545,9 @@ hard policy, Layer 2 one-directional hook, four verdicts, idempotency, the
 hash-chained ledger, the policy compiler with its offline fallback, the
 model-backed Layer 2, the mock merchant, the buyer agent with its adversarial
 twin, probe detection, and the Razorpay registration leg (order + Standard
-Checkout + signature verification). **Phase 2 (the app) — built:** an Expo
-client, the agent exposed over HTTP, and voice in both directions. 119 tests,
-no network.
+Checkout + signature verification). **Phase 2 (the app) — built:** a native
+SwiftUI client, the agent exposed over HTTP, and voice in both directions.
+119 tests, no network.
 
 **Verified live against NIM.** The compiler extracts ₹2,000 as `200000` paise,
 and refuses to invent a bound from *"whenever we run low"* or *"buy whatever you
@@ -542,7 +569,8 @@ stops at *engine allows → real order created with nobody present*, which is th
 half that proves the architecture; the half that is blocked is the half that is
 purely Razorpay account configuration.
 
-Next: an app icon, and the recorded walkthrough.
+Next: the cross-merchant marketplace, editable carts, the one-time purchase
+grant, an app icon, and the recorded walkthrough.
 
 ## Commerce: an adapter, and a mock behind it
 

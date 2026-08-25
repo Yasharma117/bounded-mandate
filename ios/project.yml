@@ -1,0 +1,38 @@
+name: BoundedMandate
+options:
+  bundleIdPrefix: dev.yasharma
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+    ENABLE_USER_SCRIPT_SANDBOXING: "YES"
+
+targets:
+  BoundedMandate:
+    type: application
+    platform: iOS
+    sources:
+      - path: BoundedMandate
+    info:
+      path: BoundedMandate/Info.plist
+      properties:
+        CFBundleDisplayName: Bounded Mandate
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSMicrophoneUsageDescription: >-
+          Bounded Mandate uses the microphone so you can speak your spending
+          rules and orders instead of typing them.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.yasharma.boundedmandate
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: "NO"

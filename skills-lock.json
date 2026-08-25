@@ -7,29 +7,11 @@
       "skillPath": "skills/app-icon/SKILL.md",
       "computedHash": "034b99a761c225d6461e68bc42eeb610e71991f54abc2b5acf973df6b879adf0"
     },
-    "appstore-connect": {
-      "source": "melvynx/aiblueprint",
-      "sourceType": "github",
-      "skillPath": "skills/appstore-connect/SKILL.md",
-      "computedHash": "67ee78592e13ca58e478bb3cbe4c38b6eecb6e12e72339c961cde4ade06543f1"
-    },
-    "expo-native-ui": {
-      "source": "expo/skills",
-      "sourceType": "github",
-      "skillPath": "plugins/expo/skills/expo-native-ui/SKILL.md",
-      "computedHash": "3bebacbb5882f72f89322391b2b82f643cea15c0e2b3e27c39659969a6addd75"
-    },
     "make-interfaces-feel-better": {
       "source": "jakubkrehel/make-interfaces-feel-better",
       "sourceType": "github",
       "skillPath": "skills/make-interfaces-feel-better/SKILL.md",
       "computedHash": "c8b15b529e088a318b2d3c17f0a97e15a7b1ce9ddab8bbdf9209e6ab7315cbde"
-    },
-    "vercel-react-native-skills": {
-      "source": "vercel-labs/agent-skills",
-      "sourceType": "github",
-      "skillPath": "skills/react-native-skills/SKILL.md",
-      "computedHash": "41d24eafa7c3d82e270439808f7cfbc4d51aeb2d14f2809a2267c16275784d06"
     }
   }
 }
