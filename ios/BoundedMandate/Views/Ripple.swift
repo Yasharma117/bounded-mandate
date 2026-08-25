@@ -23,6 +23,19 @@ struct Ripple: View {
     @State private var fade: Double = 0
 
     var body: some View {
+        // The observer lives out here, not on the ring: the ring is conditional,
+        // and an `onChange` attached to a view that has not been mounted yet
+        // never fires — which silently killed this effect entirely.
+        Color.clear
+            .allowsHitTesting(false)
+            .overlay { if fade > 0 { ring } }
+            .onChange(of: trigger) { fire() }
+    }
+
+    /// Mounted only while a ring is actually travelling. A full-screen
+    /// GeometryReader that is always present is a layout pass the thread pays
+    /// for on every frame it scrolls.
+    private var ring: some View {
         GeometryReader { geometry in
             let widest = max(geometry.size.width, geometry.size.height) * 2.2
             Circle()
@@ -32,13 +45,9 @@ struct Ripple: View {
                     x: geometry.size.width * origin.x,
                     y: geometry.size.height * origin.y
                 )
-                // The ring is decoration over a live thread; it must never
-                // cost the reader a frame of the card they are looking at.
-                .drawingGroup()
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
-        .onChange(of: trigger) { fire() }
     }
 
     private func fire() {

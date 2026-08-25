@@ -65,6 +65,20 @@ final class VoiceSession {
     private var heardSpeech = false
     private var openedMic: Date?
     private var running = false
+
+    /// Smooth the meter here rather than by animating it in the view.
+    ///
+    /// This value changes twenty times a second; attaching a 200ms animation to
+    /// it stacks twenty overlapping animations per second, which costs frames
+    /// and makes the result mushy rather than smooth. An exponential average
+    /// gives the same softness for one multiply.
+    private func smoothed(_ sample: Double) -> Double {
+        let rising = sample > level
+        // Quick to react, slow to fall — a voice that stops should leave the
+        // field settling rather than dropping out from under itself.
+        let weight = rising ? 0.55 : 0.18
+        return level + (sample - level) * weight
+    }
     /// Which service speaks. Changed live, so both can be judged by ear.
     private var provider: String?
 
@@ -158,7 +172,7 @@ final class VoiceSession {
         // -60 dB is effectively silence, 0 is clipping. Squared so quiet speech
         // still moves the field without loud speech pinning it.
         let normalised = Double(max(0, (power + 60) / 60))
-        level = normalised * normalised
+        level = smoothed(normalised * normalised)
 
         guard power < silenceThreshold else {
             heardSpeech = true
@@ -242,7 +256,7 @@ final class VoiceSession {
             while running, player.isPlaying {
                 player.updateMeters()
                 let power = player.averagePower(forChannel: 0)
-                level = Double(max(0, (power + 50) / 50))
+                level = smoothed(Double(max(0, (power + 50) / 50)))
                 try? await Task.sleep(for: .milliseconds(50))
             }
         } catch {

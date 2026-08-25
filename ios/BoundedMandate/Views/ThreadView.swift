@@ -61,25 +61,21 @@ final class Thread {
 
     /// Voice speaks into the same thread typing does. There is one
     /// conversation; the microphone is a way into it, not a place of its own.
-    /// How long the message at this index waits before arriving.
-    ///
-    /// Only the last turn staggers. Everything already on screen has a delay of
-    /// zero, so scrolling back through history does not replay an entrance.
-    func delay(for index: Int) -> TimeInterval {
-        let fromEnd = messages.count - 1 - index
-        guard fromEnd >= 0, fromEnd < turnLength else { return 0 }
-        return TimeInterval(turnLength - 1 - fromEnd) * Motion.stagger
-    }
-
-    /// How many messages the most recent turn produced.
-    private(set) var turnLength = 0
+    /// How long each message waited before arriving, decided once at append
+    /// time. Computing it per row per render meant every scroll frame did work
+    /// proportional to the whole thread, for a value that only matters in the
+    /// instant a message appears.
+    private(set) var delays: [String: TimeInterval] = [:]
 
     func append(_ message: Message) {
-        turnLength = 1
         messages.append(message)
     }
+    /// One turn can produce a sentence and a card. They land in sequence rather
+    /// than together, so the eye reads the answer before the evidence.
     func append(contentsOf added: [Message]) {
-        turnLength = added.count
+        for (offset, message) in added.enumerated() {
+            delays[message.id] = TimeInterval(offset) * Motion.stagger
+        }
         messages.append(contentsOf: added)
     }
 
@@ -137,9 +133,16 @@ struct ThreadView: View {
         NavigationStack {
             ScrollViewReader { scroller in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(Array(thread.messages.enumerated()), id: \.element.id) {
-                            index, message in
+                    // Not lazy, deliberately. A transition inside a LazyVStack
+                    // fires when a row is *realised*, so scrolling back through
+                    // history replayed entrances on things that arrived minutes
+                    // ago — which is what made it look broken.
+                    //
+                    // ponytail: fine to tens of messages; go back to lazy with
+                    // an explicit "recently arrived" set if a thread ever gets
+                    // long enough to matter.
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(thread.messages) { message in
                             Group {
                                 switch message {
                                 case .said(_, let from, let text):
@@ -150,10 +153,7 @@ struct ThreadView: View {
                                     OffersCard(product: product, offers: offers)
                                 }
                             }
-                            // One turn can produce a sentence and a card. They
-                            // land in sequence rather than together, so the eye
-                            // reads the answer before the evidence.
-                            .arrives(reduceMotion, delay: thread.delay(for: index))
+                            .arrives(reduceMotion, delay: thread.delays[message.id] ?? 0)
                         }
                         if thread.busy {
                             ProgressView().tint(theme.primary)
@@ -314,7 +314,10 @@ struct ThreadView: View {
                     .fill(theme.primary.opacity(0.14))
                     // 1.22 rather than 1.42: at the old size a loud syllable
                     // made the control jump, which reads as instability rather
-                    // than as listening.
+                    // than as listening. The level is already smoothed in the
+                    // session, so this reads it straight — animating a value
+                    // that changes twenty times a second just stacks twenty
+                    // overlapping animations and costs frames.
                     .scaleEffect(reduceMotion ? 1 : 1 + session.level * 0.22)
                 Image(systemName: symbol(for: session.phase))
                     .font(.system(size: 26, weight: .medium))
@@ -327,7 +330,6 @@ struct ThreadView: View {
         .buttonStyle(.pressable)
         .glassEffect(.regular.interactive(), in: .circle)
         .glassEffectID("composer", in: glass)
-        .animation(Motion.respectful(Motion.follow, reduced: reduceMotion), value: session.level)
         .accessibilityLabel("Stop talking")
     }
 

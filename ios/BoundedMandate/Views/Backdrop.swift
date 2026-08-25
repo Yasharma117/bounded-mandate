@@ -18,22 +18,19 @@ struct Backdrop: View {
 
     /// 0 at rest, 1 at full voice. Drives brightness and how far the mesh moves.
     var intensity: Double = 0
-    /// Voice mode leans on colour much harder than a page background should.
+    /// Voice mode leans on colour much harder than a page background should,
+    /// and is also the only time this is allowed to move.
     var vivid: Bool = false
+
+    /// A mesh gradient is not cheap, and this sits behind a scrolling thread.
+    /// Driving it from a timeline while nobody is talking spends a frame budget
+    /// on a background nobody is looking at — and costs it again on every
+    /// scroll frame, because the whole thing recomposites.
+    private var shouldDrift: Bool { vivid && !reduceMotion }
 
     var body: some View {
         Group {
-            if reduceMotion {
-                // A field that never stops moving is the single worst thing on
-                // this screen for someone who asked for less motion. It keeps
-                // its colour and loses its drift entirely.
-                MeshGradient(
-                    width: 3,
-                    height: 3,
-                    points: Self.points(at: 0, intensity: 0),
-                    colors: colors
-                )
-            } else {
+            if shouldDrift {
                 TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
                     let seconds = timeline.date.timeIntervalSinceReferenceDate
                     MeshGradient(
@@ -43,11 +40,20 @@ struct Backdrop: View {
                         colors: colors
                     )
                 }
+            } else {
+                // Still. In the thread there is nothing to react to, and for
+                // someone who asked for less motion there should be nothing
+                // moving at all.
+                MeshGradient(
+                    width: 3,
+                    height: 3,
+                    points: Self.points(at: 0, intensity: 0),
+                    colors: colors
+                )
             }
         }
         .background(theme.bgSubtle)
         .ignoresSafeArea()
-        .animation(Motion.respectful(Motion.enter(0.2), reduced: reduceMotion), value: intensity)
     }
 
     // Broken out and explicitly typed: the compiler cannot check these literals
