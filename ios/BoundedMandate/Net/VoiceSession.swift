@@ -178,10 +178,10 @@ final class VoiceSession {
 
             let result = try await Engine.runAgent(heard)
             let spoken = result.decision.map(Self.narrate) ?? result.said
-            turns.append(.said(id: "a-\(UUID().uuidString)", from: .agent, text: spoken))
-            if let decision = result.decision {
-                turns.append(.ruled(id: "d-\(UUID().uuidString)", decision: decision))
-            }
+            // Cards arrive as the conversation earns them. Spoken numbers are
+            // the thing a voice interface is worst at, so prices land on screen
+            // rather than only in the air.
+            turns.append(contentsOf: Message.from(result, spoken: spoken, key: UUID().uuidString))
             await say(spoken)
         } catch is CancellationError {
             return  // the session was stopped mid-turn; not a fault to report

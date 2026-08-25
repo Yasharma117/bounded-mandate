@@ -26,6 +26,7 @@
 		ADE569289D879E5AE7AF9EE8 /* VoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08994E31838B4504D06AEDCB /* VoiceSession.swift */; };
 		B3CCBE7DE4AF8D06C7DF3D2D /* Surfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FE80D8D802D5B02E2DF3C0 /* Surfaces.swift */; };
 		B89B81EFC730E92C5C6317EA /* turn_deny.json in Resources */ = {isa = PBXBuildFile; fileRef = FBE069DC68F919F6052214CE /* turn_deny.json */; };
+		C9175BE14C157761031F15B0 /* turn_prices.json in Resources */ = {isa = PBXBuildFile; fileRef = 4B4772911BE45B54FA37B34F /* turn_prices.json */; };
 		D1E861CE4594428BD4513065 /* ShoppingListCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B62812298D584BB58C041C20 /* ShoppingListCard.swift */; };
 		D400D29C8D8E0A2DF378D6FB /* Tokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C88F6845192AEB050232DC9 /* Tokens.swift */; };
 		E1F4E838FDCC3F49630592FB /* OffersCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EA33E9B6CFE9D623F014033 /* OffersCard.swift */; };
@@ -54,6 +55,7 @@
 		461AAC29A571034CD100B1F6 /* Decision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Decision.swift; sourceTree = "<group>"; };
 		475F8843619C3FBCD0806282 /* ThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadView.swift; sourceTree = "<group>"; };
 		483AA4A36F0EBA528FDE34FD /* BoundedMandateApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedMandateApp.swift; sourceTree = "<group>"; };
+		4B4772911BE45B54FA37B34F /* turn_prices.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = turn_prices.json; sourceTree = "<group>"; };
 		547E104CAEC12ADCF7194C89 /* offers_category_blocked.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = offers_category_blocked.json; sourceTree = "<group>"; };
 		5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListSheet.swift; sourceTree = "<group>"; };
 		65F3DEBE3C2F147F07F33CE0 /* BoundedMandateTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BoundedMandateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -141,6 +143,7 @@
 				43F2DF620B35C624AAC1C692 /* offers.json */,
 				FBE069DC68F919F6052214CE /* turn_deny.json */,
 				C9736444AF6DBCB412CF4E12 /* turn_escalate.json */,
+				4B4772911BE45B54FA37B34F /* turn_prices.json */,
 			);
 			path = Payloads;
 			sourceTree = "<group>";
@@ -257,6 +260,7 @@
 				61E773A70F15F85EB79EB42F /* offers_category_blocked.json in Resources */,
 				B89B81EFC730E92C5C6317EA /* turn_deny.json in Resources */,
 				38847C894E60C2D51CDA457C /* turn_escalate.json in Resources */,
+				C9175BE14C157761031F15B0 /* turn_prices.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

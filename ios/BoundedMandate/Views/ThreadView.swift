@@ -24,12 +24,28 @@ struct Opener: Identifiable {
 enum Message: Identifiable {
     case said(id: String, from: Bubble.Author, text: String)
     case ruled(id: String, decision: Decision)
+    case priced(id: String, product: String, offers: [Offer])
 
     var id: String {
         switch self {
         case .said(let id, _, _): id
         case .ruled(let id, _): id
+        case .priced(let id, _, _): id
         }
+    }
+
+    /// Everything a turn earned, as messages.
+    static func from(_ turn: AgentTurn, spoken: String, key: String) -> [Message] {
+        var out: [Message] = [.said(id: "a-\(key)", from: .agent, text: spoken)]
+        for card in turn.surfaced {
+            switch card {
+            case .offers(let product, let offers):
+                out.append(.priced(id: "o-\(key)-\(product)", product: product, offers: offers))
+            case .decision(let decision):
+                out.append(.ruled(id: "d-\(key)", decision: decision))
+            }
+        }
+        return out
     }
 }
 
@@ -69,10 +85,7 @@ final class Thread {
         do {
             let result = try await Engine.runAgent(said, adversarial: adversarial)
             let spoken = result.decision.map(narrate) ?? result.said
-            messages.append(.said(id: "a-\(turn)", from: .agent, text: spoken))
-            if let decision = result.decision {
-                messages.append(.ruled(id: "d-\(turn)", decision: decision))
-            }
+            messages.append(contentsOf: Message.from(result, spoken: spoken, key: "\(turn)"))
             // Deliberately silent. Typing is a quiet interaction, and
             // answering it aloud is the app talking over you — speech belongs
             // to voice mode, where a conversation is what you asked for.
@@ -103,6 +116,8 @@ struct ThreadView: View {
                                 Bubble(from: from, text: text)
                             case .ruled(_, let decision):
                                 DecisionCard(decision: decision)
+                            case .priced(_, let product, let offers):
+                                OffersCard(product: product, offers: offers)
                             }
                         }
                         if thread.busy {
@@ -126,15 +141,16 @@ struct ThreadView: View {
                     }
                     .accessibilityLabel("Shopping list")
                 }
-                // DEV ONLY — goes with Gallery.swift before submission.
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink { Gallery() } label: {
-                        Image(systemName: "rectangle.stack")
-                    }
-                }
             }
             .sheet(isPresented: $showingList) { ListSheet() }
             .fullScreenCover(isPresented: $showingVoice) { VoiceAgentView() }
+            // DEV: -BMAsk "..." sends one message on launch, so a whole turn
+            // can be screenshotted without a keyboard.
+            .task {
+                if let opening = UserDefaults.standard.string(forKey: "BMAsk") {
+                    await thread.send(opening)
+                }
+            }
             .safeAreaBar(edge: .bottom) { composer }
         }
     }

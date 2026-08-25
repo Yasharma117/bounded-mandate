@@ -291,6 +291,18 @@ def run_agent(body: Instruction) -> dict:
     except Exception as exc:  # a model outage is a 502, not a silent approval
         raise HTTPException(502, f"the agent could not run: {exc}") from exc
 
+    # Annotate what the agent found *on the way out*, never in the tool result.
+    # `in_policy` is the policy's judgement, and the agent is not allowed to
+    # learn its policy — knowing why it was refused is not the same as being
+    # able to see what it is refused for. The app gets the annotation; the
+    # model never did.
+    steps = []
+    for step in run.steps:
+        result = step.result
+        if step.tool == "search_catalog" and "offers" in result:
+            result = {"offers": _annotate(result["offers"])}
+        steps.append({"tool": step.tool, "args": step.args, "result": result})
+
     charge = next((s for s in reversed(run.steps) if s.tool == "request_charge"), None)
     claimed = int(charge.args.get("claimed_total_paise") or 0) if charge else 0
     cart = next((s for s in run.steps if s.tool == "create_cart"), None)
@@ -298,7 +310,7 @@ def run_agent(body: Instruction) -> dict:
 
     return {
         "said": run.said,
-        "steps": [{"tool": s.tool, "args": s.args, "result": s.result} for s in run.steps],
+        "steps": steps,
         "decision": (
             _rendered(run.decision, claimed_total_paise=claimed, cart_items=items)
             if run.decision
@@ -389,6 +401,20 @@ def speak_text(body: SpeakRequest) -> Response:
 def voice_providers() -> dict:
     """Which services can speak, and which one is speaking by default."""
     return {"providers": sorted(SPEAKERS), "default": TTS_PROVIDER}
+
+
+def _annotate(offers: list[dict]) -> list[dict]:
+    """Add the policy's verdict and a working link to offers the agent found."""
+    policy = POLICIES["mdt_demo"]
+    return [
+        {
+            **offer,
+            "url": f"/m/{offer['merchant']}/p/{quote(offer['name'])}",
+            "merchant_allowed": offer["merchant"] in policy.merchants,
+            "category_allowed": offer.get("category") in policy.categories,
+        }
+        for offer in offers
+    ]
 
 
 def _offer_rows(query: str) -> list[dict]:

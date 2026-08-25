@@ -84,6 +84,8 @@ struct VoiceAgentView: View {
                             Bubble(from: from, text: text)
                         case .ruled(_, let decision):
                             DecisionCard(decision: decision)
+                        case .priced(_, let product, let offers):
+                            OffersCard(product: product, offers: offers)
                         }
                     }
                     Color.clear.frame(height: 1).id("end")

@@ -380,6 +380,14 @@ speaks — so a screen with no words on it still reads as listening, and never
 looks frozen during the seconds where nothing has been decided. Cards arrive
 only as the conversation earns them.
 
+**Cards arrive as the conversation earns them.** Asking what something costs
+puts the comparison on screen and the agent says one sentence — every price is
+already in front of the person it is talking to, and reciting a table aloud is
+the worst thing a voice can do. The agent also cannot say which shop is
+permitted, because it is not allowed to know: offers are annotated with the
+policy's verdict **on the way out to the app**, never in the tool result the
+model saw. A test asserts the model was handed them bare.
+
 **The room is not a user.** Scribe tags non-speech as `[music]`,
 `[outro jingle]`, `[silence]`, and those arrive looking exactly like an
 utterance. Forwarding them would let a television in the background talk to an

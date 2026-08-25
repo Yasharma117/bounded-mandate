@@ -133,9 +133,70 @@ struct Decision: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// One tool the agent reached for, and what came back.
+struct AgentStep: Codable, Sendable {
+    let tool: String
+    let result: StepResult
+
+    struct StepResult: Codable, Sendable {
+        /// Present on `search_catalog`, annotated with the policy's verdict on
+        /// the way out — the model itself saw these bare.
+        let offers: [Offer]?
+        /// Present on `read_shopping_list`.
+        let itemNames: [String]?
+
+        enum CodingKeys: String, CodingKey {
+            case offers
+            case itemNames = "item_names"
+        }
+    }
+}
+
 struct AgentTurn: Codable, Sendable {
     let said: String
     let decision: Decision?
+    let steps: [AgentStep]
+
+    /// Cards this turn earned, in the order they were earned.
+    ///
+    /// A conversation should leave things behind. Asking what something costs
+    /// should put the prices on screen, not only say them — spoken numbers are
+    /// the one thing a voice interface is worst at.
+    var surfaced: [Surfaced] {
+        var cards: [Surfaced] = []
+        for step in steps {
+            guard let offers = step.result.offers, !offers.isEmpty else { continue }
+            // One card per product, so three shops for one item read as a
+            // comparison rather than as three unrelated results.
+            for (product, group) in Dictionary(grouping: offers, by: \.name)
+                .sorted(by: { $0.key < $1.key }) {
+                cards.append(.offers(product: product, offers: group))
+            }
+        }
+        if let decision { cards.append(.decision(decision)) }
+        return cards
+    }
+
+    enum Surfaced: Identifiable {
+        case offers(product: String, offers: [Offer])
+        case decision(Decision)
+
+        var id: String {
+            switch self {
+            case .offers(let product, _): "offers-" + product
+            case .decision(let decision): "decision-" + decision.id
+            }
+        }
+    }
+
+    init(from decoder: any Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        said = try box.decode(String.self, forKey: .said)
+        decision = try box.decodeIfPresent(Decision.self, forKey: .decision)
+        steps = try box.decodeIfPresent([AgentStep].self, forKey: .steps) ?? []
+    }
+
+    enum CodingKeys: String, CodingKey { case said, decision, steps }
 }
 
 /// "1 item", not "1 items". Small, but the card is the product's voice and a

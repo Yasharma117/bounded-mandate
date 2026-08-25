@@ -393,3 +393,48 @@ def test_the_agent_builds_from_the_edited_list_not_the_seeded_one(client, monkey
 
     handed = seen["shopping_list"]
     assert handed.item_names == ("Toned milk 1L x2", "Smartwatch")
+
+
+def test_the_app_sees_policy_flags_the_agent_never_did(client, monkeypatch):
+    """Offers reach the app annotated with the policy's judgement, and reach the
+    *model* bare. Knowing why it was refused is not the same as being able to
+    see what it is refused for, and a search result carrying the allowlist would
+    hand it over."""
+
+    class SearchingAgent:
+        def __init__(self, **kwargs):
+            self.marketplace = kwargs["marketplace"]
+
+        def run(self, _instruction, **_):
+            from bounded_mandate.agent import AgentRun, Step
+
+            raw = {
+                "offers": [
+                    {
+                        "merchant": "blinkit",
+                        "name": "Bananas 1kg",
+                        "price_paise": 5_400,
+                        "category": "groceries",
+                    },
+                    {
+                        "merchant": "instamart",
+                        "name": "Bananas 1kg",
+                        "price_paise": 6_000,
+                        "category": "groceries",
+                    },
+                ]
+            }
+            # What the model was handed carries no verdict at all.
+            assert all("merchant_allowed" not in o for o in raw["offers"])
+            run = AgentRun(instruction="x", said="here are prices")
+            run.steps = [Step("search_catalog", {"query": "Bananas 1kg"}, raw)]
+            return run
+
+    monkeypatch.setattr(web, "BuyerAgent", SearchingAgent)
+    body = client.post("/api/agent", json={"text": "what do bananas cost"}).json()
+
+    offers = body["steps"][0]["result"]["offers"]
+    by_merchant = {o["merchant"]: o for o in offers}
+    assert by_merchant["blinkit"]["merchant_allowed"] is False
+    assert by_merchant["instamart"]["merchant_allowed"] is True
+    assert all(o["url"].startswith("/m/") for o in offers)

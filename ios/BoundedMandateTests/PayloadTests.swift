@@ -90,7 +90,10 @@ struct PayloadTests {
         let turn = try decode(AgentTurn.self, "turn_deny")
         let decision = try #require(turn.decision)
         #expect(decision.verdict == .deny)
-        #expect(decision.reasons.count >= 4)
+        // Not a fixed count: `agent.probing` and `frequency.exceeded` depend on
+        // what the ledger already holds, so pinning a number would make this
+        // test a record of one run's history rather than of the behaviour.
+        #expect(decision.reasons.count >= 2, "a refusal should stack its reasons")
         #expect(decision.lied)
         #expect(decision.claimedTotalPaise < decision.realTotalPaise)
         // Reason codes are the card's row keys; duplicates would drop rows.
@@ -274,3 +277,53 @@ struct SpeechFilterTests {
         #expect(!Voice.isSpeech("."))
     }
 }
+
+/// A turn should leave cards behind. Spoken numbers are the one thing a voice
+/// interface is worst at, so prices have to land on screen too.
+struct SurfacedCardTests {
+    private func decode<T: Decodable>(_ type: T.Type, _ name: String) throws -> T {
+        let url = try #require(
+            Bundle(for: SurfacedBundleMarker.self).url(forResource: name, withExtension: "json"),
+            "missing fixture \(name).json"
+        )
+        return try JSONDecoder().decode(type, from: try Data(contentsOf: url))
+    }
+
+    @Test func askingWhatSomethingCostsPutsThePricesOnScreen() throws {
+        let turn = try decode(AgentTurn.self, "turn_prices")
+        #expect(turn.decision == nil, "a price question must not order anything")
+
+        let cards = turn.surfaced
+        #expect(!cards.isEmpty, "the agent searched and the screen showed nothing")
+
+        guard case .offers(let product, let offers) = cards[0] else {
+            Issue.record("expected an offers card")
+            return
+        }
+        #expect(product.contains("atta"))
+        // Grouped per product, so three shops read as one comparison.
+        #expect(offers.count == 3)
+        #expect(Set(offers.map(\.merchant)) == ["blinkit", "zepto", "instamart"])
+    }
+
+    @Test func offersReachTheAppWithThePolicysVerdictAttached() throws {
+        let turn = try decode(AgentTurn.self, "turn_prices")
+        guard case .offers(_, let offers) = turn.surfaced[0] else { return }
+
+        let cheapest = try #require(offers.min { $0.pricePaise < $1.pricePaise })
+        #expect(cheapest.merchant == "blinkit")
+        #expect(!cheapest.buyable, "the cheapest shop is the off-policy one")
+        #expect(offers.allSatisfy { $0.url.hasPrefix("/m/") })
+    }
+
+    @Test func aTurnThatOrderedSomethingEndsWithItsVerdict() throws {
+        let turn = try decode(AgentTurn.self, "turn_escalate")
+        let last = try #require(turn.surfaced.last)
+        guard case .decision = last else {
+            Issue.record("the verdict must be the last thing a buying turn shows")
+            return
+        }
+    }
+}
+
+private final class SurfacedBundleMarker {}
