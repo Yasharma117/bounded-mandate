@@ -1,0 +1,47 @@
+{
+  "products": [
+    {
+      "productId": "P-1001",
+      "parentProductId": "PP-1001",
+      "displayName": "Amul Toned Milk",
+      "brand": "Amul",
+      "inStock": true,
+      "isAvail": true,
+      "variations": [
+        {
+          "spinId": "SP-1001-500",
+          "skuId": "SKU-1001-500",
+          "quantityDescription": "500 ml",
+          "displayName": "Amul Toned Milk 500 ml",
+          "price": {"mrp": 30, "offerPrice": 28},
+          "isInStockAndAvailable": true,
+          "maxQuantity": 6
+        },
+        {
+          "spinId": "SP-1001-1000",
+          "skuId": "SKU-1001-1000",
+          "quantityDescription": "1 L",
+          "displayName": "Amul Toned Milk 1 L",
+          "price": {"mrp": 58, "offerPrice": 54},
+          "isInStockAndAvailable": true,
+          "maxQuantity": 4
+        }
+      ]
+    },
+    {
+      "productId": "P-2002",
+      "displayName": "Britannia Brown Bread",
+      "brand": "Britannia",
+      "inStock": true,
+      "variations": [
+        {
+          "spinId": "SP-2002-400",
+          "skuId": "SKU-2002-400",
+          "quantityDescription": "400 g",
+          "price": {"mrp": 60, "offerPrice": 55},
+          "isInStockAndAvailable": true
+        }
+      ]
+    }
+  ]
+}

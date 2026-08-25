@@ -31,10 +31,11 @@ from pydantic import BaseModel, Field
 
 from .agent import ADVERSARIAL_SYSTEM, BuyerAgent
 from .basket import ListKind, ShoppingList, seed_lists
+from .commerce import build as build_commerce
 from .compiler import compile_mandate
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import Ledger
-from .merchant import Marketplace, UnknownItem, UnknownMerchant
+from .merchant import UnknownItem, UnknownMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
 from .voice import SPEAKERS, TTS_PROVIDER, VoiceUnavailable, speak, transcribe
 from .wording import summary, title
@@ -63,7 +64,9 @@ HOME = "12 Nandidurga Rd, Bengaluru"
 # the demo has one mandate and one merchant, so a module-level store is honest
 # about what it is rather than pretending to be a database.
 LEDGER = Ledger(os.environ.get("BM_LEDGER", "ledger.jsonl"))
-MARKETPLACE = Marketplace()
+# `BM_COMMERCE=swiggy` swaps in real Instamart. Mock is the default so tests,
+# CI and a recorded demo never depend on a five-day token.
+MARKETPLACE = build_commerce()
 # The user's lists. Owned by the user, read by the agent, and there is no route
 # and no agent tool that lets the agent write one — see `basket`.
 LISTS: dict[str, ShoppingList] = seed_lists()

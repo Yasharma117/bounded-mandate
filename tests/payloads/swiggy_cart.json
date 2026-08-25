@@ -1,0 +1,29 @@
+{
+  "cartId": "session-cart-1",
+  "items": [
+    {
+      "skuId": "SKU-1001-1000",
+      "displayName": "Amul Toned Milk 1 L",
+      "mrp": "58",
+      "discountedFinalPrice": "54",
+      "quantity": 2
+    },
+    {
+      "skuId": "SKU-2002-400",
+      "displayName": "Britannia Brown Bread 400 g",
+      "mrp": "60",
+      "discountedFinalPrice": "55",
+      "quantity": 1
+    }
+  ],
+  "cartTotalAmount": "163",
+  "billBreakdown": {
+    "lineItems": [
+      {"label": "Item total", "value": "163"},
+      {"label": "Delivery fee", "value": "0"}
+    ],
+    "toPay": "163"
+  },
+  "selectedAddressDetails": {"address": "12 Nandidurga Rd, Bengaluru"},
+  "unserviceableItems": []
+}
