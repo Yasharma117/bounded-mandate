@@ -138,6 +138,12 @@ struct AgentTurn: Codable, Sendable {
     let decision: Decision?
 }
 
+/// "1 item", not "1 items". Small, but the card is the product's voice and a
+/// broken plural reads as a broken build.
+func plural(_ count: Int, _ singular: String, _ many: String? = nil) -> String {
+    "\(count) " + (count == 1 ? singular : (many ?? singular + "s"))
+}
+
 /// Integer paise throughout, never floats — the same rule the engine keeps.
 func rupees(_ paise: Int) -> String {
     let formatter = NumberFormatter()

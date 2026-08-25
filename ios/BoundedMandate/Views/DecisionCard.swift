@@ -95,8 +95,8 @@ struct DecisionCard: View {
             HStack(spacing: 6) {
                 Text(
                     decision.flagged.isEmpty
-                        ? "\(decision.items.count) items"
-                        : "\(decision.flagged.count) of \(decision.items.count) items flagged"
+                        ? plural(decision.items.count, "item")
+                        : "\(decision.flagged.count) of \(plural(decision.items.count, "item")) flagged"
                 )
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(decision.flagged.isEmpty ? theme.textMuted : tint)

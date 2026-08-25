@@ -140,7 +140,7 @@ struct ShoppingListCard: View {
                 .frame(minHeight: 44)
             }
             Spacer()
-            Text("\(list.items.count) items")
+            Text(plural(list.items.count, "item"))
                 .font(.system(size: 13))
                 .monospacedDigit()
                 .foregroundStyle(theme.textMuted)

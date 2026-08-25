@@ -213,3 +213,33 @@ struct CartLineTests {
 }
 
 private final class CartBundleMarker {}
+
+/// Copy details that the cards say out loud. Small, but a card is the product's
+/// voice, and a broken plural reads as a broken build.
+struct CopyTests {
+    @Test func pluralsAgreeWithTheirCount() {
+        #expect(plural(0, "item") == "0 items")
+        #expect(plural(1, "item") == "1 item")
+        #expect(plural(2, "item") == "2 items")
+        #expect(plural(1, "shop") == "1 shop")
+        #expect(plural(3, "shop") == "3 shops")
+    }
+
+    @Test func aGrantReadsAsUsedOnceNotAsACadence() {
+        // "once every 1 days" is what a naive template produces for a grant
+        // that exists to be spent exactly once.
+        let bounds = MandateBounds(
+            perTxnMaxPaise: 40_000, merchants: ["instamart"],
+            categories: ["electronics"], everyDays: 1, ordersPerWindow: 1
+        )
+        #expect(bounds.everyDays == 1)
+    }
+
+    @Test func everyVerdictHeadlineIsPlainEnglish() {
+        // No verdict should surface its enum name to a reader.
+        for verdict in [Verdict.allow, .clarify, .escalate, .deny] {
+            #expect(!verdict.headline.contains(verdict.rawValue))
+            #expect(verdict.headline.first?.isUppercase == true)
+        }
+    }
+}

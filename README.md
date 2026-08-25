@@ -350,6 +350,89 @@ ELEVENLABS_API_KEY=sk_...          # the key, not the key ID beside it
 
 Unset, the routes return `503` and the app stays text-only.
 
+### The shopping list
+
+"My usual groceries" used to be a tuple in Python that the user could not see or
+change. It is now a document they own — [`basket.py`](bounded_mandate/basket.py)
+— editable over HTTP, priced against the merchant their mandate allows, and
+shown with the cap it has to clear.
+
+**The list is not the policy.** The policy bounds *how much*; the list defines
+*what*. Keeping them apart matters: raising a cap and adding an item are
+different decisions, and collapsing them into one object would make every basket
+edit read as a spending change. A test asserts that editing the list writes no
+ledger entry and moves no cap.
+
+**The agent reads it and has no tool that writes it.** That absence is a
+security property, not an oversight. An agent that could redefine "usual" could
+then order the new definition entirely within policy — an escalation that never
+trips a bound, arriving through a door nobody was watching. Two tests pin it,
+one of which calls the dispatcher with an invented write tool and checks the
+list is unchanged.
+
+The card carries a cap meter rather than two numbers side by side, because a
+number beside a number is arithmetic the reader has to do themselves. A list
+that cannot clear the policy says so while it is still editable, instead of
+after an agent run reports an escalation.
+
+### Cards
+
+Every card was built against a dev gallery — `Gallery.swift`, reachable with
+`-BMGallery YES` — because iterating design against the real thread costs a
+six-second model round-trip and a ledger reset per state.
+
+| Card | States | What it answers |
+|---|---|---|
+| Decision | allow, clarify, escalate, deny, captured | what the engine ruled, why, and whether money moved |
+| Shopping list | inside cap, over cap, unstocked line, read-only | what I buy, what it costs, will it clear my rule |
+| Offers | several shops, sole shop | who sells it, for how much, which of them my rule reaches |
+| Mandate | standing, one-time grant | exactly what I have authorised |
+
+Things found by looking at renders rather than by reasoning about them:
+
+- an allowed shop selling a disallowed category read as **"not on your list"**,
+  naming the wrong reason. The server now answers merchant and category
+  separately, and the card says which one it was. Naming the wrong reason is
+  worse than naming none.
+- a twelve-item list filled the whole thread. Collapsed to four, with the total
+  and the cap meter kept above the fold, since those are what the reader came
+  for.
+- a refusal saying "2 items outside your scope" showed no cart. The decision now
+  carries the cart the *engine fetched*, each line marked by the policy, and the
+  card opens it by itself when something in it is the reason for the verdict.
+- `1 SHOPS`, `once every 1 days`, and a "cheapest" badge on a sole offer.
+
+### Testing the cards
+
+`ios/BoundedMandateTests` decodes payloads **captured from a running engine**,
+not hand-written JSON, so the failure it catches is the server changing shape. A
+card that silently renders a default because a key was renamed is worse than one
+that fails to render, and money figures are exactly where that must not happen.
+
+It earned itself twice during the build: once when a stale `uvicorn` was still
+serving `in_policy` after that field had been split in two, and once when a
+fixture predated the `merchant` key. Seventeen tests, including that the flagged
+lines and the reason prose agree with each other, and that the cart lines sum to
+the figure printed above them.
+
+```bash
+cd ios && xcodebuild test -scheme BoundedMandate \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+```
+
+### Three shops, and why that matters
+
+`Marketplace` routes on a cart-id prefix, so the engine still sees one adapter
+and still checks `cart.merchant` against the policy — unchanged. Blinkit
+deliberately undercuts Instamart on the staples, so **"cheapest" and "within
+your rule" point at different baskets**. That is the only honest way to show a
+merchant allowlist is a real constraint rather than decoration, and the offers
+card states the premium out loud: *"Staying on your list costs ₹16 more."*
+
+Product links resolve to a real storefront rather than 404ing, which also gives
+the injected catalog item a page where the planted instruction sits in plain
+sight of anyone who looks.
+
 ### The agent, over HTTP
 
 `POST /api/agent` hands an instruction to the buyer agent and reports what it
@@ -546,8 +629,9 @@ hash-chained ledger, the policy compiler with its offline fallback, the
 model-backed Layer 2, the mock merchant, the buyer agent with its adversarial
 twin, probe detection, and the Razorpay registration leg (order + Standard
 Checkout + signature verification). **Phase 2 (the app) — built:** a native
-SwiftUI client, the agent exposed over HTTP, and voice in both directions.
-119 tests, no network.
+SwiftUI client, the agent over HTTP, voice both ways, a user-owned shopping list,
+a three-merchant marketplace, and the card set that reads them. 130 Python tests
+and 17 Swift tests, no network.
 
 **Verified live against NIM.** The compiler extracts ₹2,000 as `200000` paise,
 and refuses to invent a bound from *"whenever we run low"* or *"buy whatever you
@@ -569,8 +653,8 @@ stops at *engine allows → real order created with nobody present*, which is th
 half that proves the architecture; the half that is blocked is the half that is
 purely Razorpay account configuration.
 
-Next: the cross-merchant marketplace, editable carts, the one-time purchase
-grant, an app icon, and the recorded walkthrough.
+Next: the one-time purchase grant with its real checkout, an app icon, and the
+recorded walkthrough.
 
 ## Commerce: an adapter, and a mock behind it
 

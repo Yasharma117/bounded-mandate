@@ -28,7 +28,7 @@ struct OffersCard: View {
         Card {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Eyebrow(text: offers.count == 1 ? "1 shop" : "\(offers.count) shops", color: theme.primary)
+                    Eyebrow(text: plural(offers.count, "shop"), color: theme.primary)
                     Text(product)
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(theme.textNormal)

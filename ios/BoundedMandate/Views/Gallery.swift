@@ -44,8 +44,10 @@ struct Gallery: View {
     }
 
     @ViewBuilder private var lists: some View {
-        label("the usual basket — comfortably inside the cap")
-        ShoppingListCard(list: Fixtures.usual, onRemove: { _ in }, onAdd: {})
+        if !reversed {
+            label("the usual basket — comfortably inside the cap")
+            ShoppingListCard(list: Fixtures.usual, onRemove: { _ in }, onAdd: {})
+        }
 
         label("over cap — says so while it is still editable")
         ShoppingListCard(list: Fixtures.overCap, onRemove: { _ in }, onAdd: {})
@@ -57,8 +59,12 @@ struct Gallery: View {
         ShoppingListCard(list: Fixtures.short, editable: false)
     }
 
+    /// DEV: -BMReverse YES starts from the bottom of a section, so the tall
+    /// variants can be screenshotted without a scroll gesture.
+    private var reversed: Bool { UserDefaults.standard.bool(forKey: "BMReverse") }
+
     @ViewBuilder private var verdicts: some View {
-        ForEach(Fixtures.decisions, id: \.id) { decision in
+        ForEach(reversed ? Fixtures.decisions.reversed() : Fixtures.decisions, id: \.id) { decision in
             label(decision.paymentID == nil ? decision.verdict.rawValue : "ALLOW · captured")
             DecisionCard(decision: decision)
         }
