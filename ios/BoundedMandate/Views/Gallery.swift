@@ -55,7 +55,7 @@ struct Gallery: View {
         label("an item this shop does not stock")
         ShoppingListCard(list: Fixtures.withGap, onRemove: { _ in }, onAdd: {})
 
-        label("read-only, as the agent quotes it back")
+        label("a one-off, already spent")
         ShoppingListCard(list: Fixtures.short, editable: false)
     }
 
@@ -119,25 +119,29 @@ enum Fixtures {
 
     static let usual = ShoppingList(
         listID: "usual", name: "My usual groceries", merchant: "instamart",
-        items: usualItems, totalPaise: 185_000, capPaise: 200_000, unstocked: []
+        items: usualItems, totalPaise: 185_000, capPaise: 200_000, unstocked: [],
+        everyDays: 4, due: true, schedule: "Every 4 days"
     )
 
     static let overCap = ShoppingList(
         listID: "usual", name: "My usual groceries", merchant: "instamart",
         items: usualItems + [item("Bluetooth earbuds", 40_000)],
-        totalPaise: 225_000, capPaise: 200_000, unstocked: []
+        totalPaise: 225_000, capPaise: 200_000, unstocked: [],
+        everyDays: 4, schedule: "Every 4 days"
     )
 
     static let withGap = ShoppingList(
         listID: "usual", name: "My usual groceries", merchant: "instamart",
         items: Array(usualItems.prefix(4)) + [item("Kombucha 500ml", nil)],
-        totalPaise: 62_000, capPaise: 200_000, unstocked: ["Kombucha 500ml"]
+        totalPaise: 62_000, capPaise: 200_000, unstocked: ["Kombucha 500ml"],
+        everyDays: 7, schedule: "Every 7 days"
     )
 
     static let short = ShoppingList(
         listID: "usual", name: "My usual groceries", merchant: "instamart",
         items: Array(usualItems.prefix(3)), totalPaise: 53_000,
-        capPaise: 200_000, unstocked: []
+        capPaise: 200_000, unstocked: [],
+        kind: "once", spent: true, schedule: "Ordered once, done"
     )
 
     static func offer(

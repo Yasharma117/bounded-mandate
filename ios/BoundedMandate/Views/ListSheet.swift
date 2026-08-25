@@ -8,39 +8,79 @@ import SwiftUI
 /// is no local copy that can drift from it.
 @MainActor @Observable
 final class ListStore {
-    private(set) var list: ShoppingList?
+    private(set) var lists: [ShoppingList] = []
     private(set) var problem: String?
     private(set) var saving = false
 
     func load() async {
         do {
-            list = try await Engine.readList()
+            lists = try await Engine.readLists()
             problem = nil
         } catch {
             problem = error.localizedDescription
         }
     }
 
-    /// Optimistic, then reconciled: the row disappears immediately, and the
-    /// server's repriced answer replaces it. If the write fails the server copy
-    /// is restored, because the list is the one thing that must not silently
+    /// Optimistic, then reconciled: the row goes immediately and the server's
+    /// repriced answer replaces it. If the write fails the server copy is
+    /// restored, because the list is the one thing that must not silently
     /// diverge from what the agent reads.
-    func remove(_ item: ListItem) async {
-        guard let current = list else { return }
-        let kept = current.items.filter { $0.name != item.name }
-        await write(kept.map(\.name))
+    func remove(_ item: ListItem, from list: ShoppingList) async {
+        await write(list, items: list.items.filter { $0.name != item.name }.map(\.name))
     }
 
-    func add(_ name: String) async {
-        guard let current = list, !current.items.contains(where: { $0.name == name }) else { return }
-        await write(current.items.map(\.name) + [name])
+    func add(_ name: String, to list: ShoppingList) async {
+        guard !list.items.contains(where: { $0.name == name }) else { return }
+        await write(list, items: list.items.map(\.name) + [name])
     }
 
-    private func write(_ names: [String]) async {
+    func setPaused(_ paused: Bool, on list: ShoppingList) async {
+        await replacing(list) { try await Engine.setSchedule(list.listID, paused: paused) }
+    }
+
+    func setCadence(_ days: Int, on list: ShoppingList) async {
+        await replacing(list) { try await Engine.setSchedule(list.listID, everyDays: days) }
+    }
+
+    func create(name: String, items: [String], once: Bool, everyDays: Int?, runOn: String?)
+        async
+    {
         saving = true
         defer { saving = false }
         do {
-            list = try await Engine.writeList(items: names)
+            let made = try await Engine.createList(
+                name: name, items: items, once: once, everyDays: everyDays, runOn: runOn
+            )
+            lists.append(made)
+            await load()
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+
+    func delete(_ list: ShoppingList) async {
+        do {
+            try await Engine.deleteList(list.listID)
+            lists.removeAll { $0.listID == list.listID }
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+
+    private func write(_ list: ShoppingList, items: [String]) async {
+        await replacing(list) { try await Engine.writeList(list.listID, items: items) }
+    }
+
+    private func replacing(
+        _ list: ShoppingList, _ work: @escaping () async throws -> ShoppingList
+    ) async {
+        saving = true
+        defer { saving = false }
+        do {
+            let updated = try await work()
+            if let index = lists.firstIndex(where: { $0.listID == list.listID }) {
+                lists[index] = updated
+            }
             problem = nil
         } catch {
             problem = error.localizedDescription
@@ -53,27 +93,28 @@ struct ListSheet: View {
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
     @State private var store = ListStore()
-    @State private var adding = false
+    @State private var addingTo: ShoppingList?
+    @State private var creating = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if let list = store.list {
-                        ShoppingListCard(
-                            list: list,
-                            onRemove: { item in Task { await store.remove(item) } },
-                            onAdd: { adding = true }
-                        )
-                        Text(
-                            "The agent reads this list. It has no way to change it — "
-                          + "only you do."
-                        )
-                        .font(.system(size: 13))
-                        .foregroundStyle(theme.textMuted)
-                        .padding(.horizontal, 4)
-                    } else if store.problem == nil {
+                VStack(alignment: .leading, spacing: 22) {
+                    if store.lists.isEmpty, store.problem == nil {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                    }
+
+                    ForEach(store.lists) { list in
+                        VStack(alignment: .leading, spacing: 8) {
+                            ScheduleBar(list: list, store: store)
+                            ShoppingListCard(
+                                list: list,
+                                onRemove: { item in
+                                    Task { await store.remove(item, from: list) }
+                                },
+                                onAdd: { addingTo = list }
+                            )
+                        }
                     }
 
                     if let problem = store.problem {
@@ -81,27 +122,172 @@ struct ListSheet: View {
                             .font(.system(size: 13))
                             .foregroundStyle(theme.negative)
                             .textSelection(.enabled)
-                            .padding(.horizontal, 4)
                     }
+
+                    Text(
+                        "The agent reads these lists. It has no way to change them — "
+                      + "only you do. A schedule says when it should try, never what "
+                      + "it may buy."
+                    )
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.textMuted)
+                    .padding(.horizontal, 4)
                 }
                 .padding(16)
             }
             .background(Backdrop())
-            .navigationTitle("Shopping list")
+            .navigationTitle("Shopping lists")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { creating = true } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("New list")
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
-            .sheet(isPresented: $adding) {
-                AddItemSheet { name in Task { await store.add(name) } }
+            .sheet(item: $addingTo) { list in
+                AddItemSheet { name in Task { await store.add(name, to: list) } }
+            }
+            .sheet(isPresented: $creating) {
+                NewListSheet { name, once, everyDays, runOn in
+                    Task {
+                        await store.create(
+                            name: name, items: [], once: once,
+                            everyDays: everyDays, runOn: runOn
+                        )
+                    }
+                }
             }
         }
         .task { await store.load() }
     }
 }
 
+/// When a list runs, and the controls for changing that. Above the card rather
+/// than inside it, because *what* and *when* are two different decisions and
+/// putting them in one box makes every edit look like the other kind.
+private struct ScheduleBar: View {
+    @Environment(\.theme) private var theme
+    let list: ShoppingList
+    let store: ListStore
+
+    private var cadences: [Int] { [1, 2, 3, 4, 7, 14] }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: list.isOneOff ? "calendar" : "arrow.triangle.2.circlepath")
+                .font(.system(size: 11, weight: .semibold))
+            Text(list.schedule)
+                .font(.system(size: 12, weight: .medium))
+            if list.due, !list.paused, !list.spent {
+                Text("due now")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.primary)
+            }
+
+            Spacer()
+
+            Menu {
+                if !list.isOneOff {
+                    Picker("Repeat", selection: cadenceBinding) {
+                        ForEach(cadences, id: \.self) { days in
+                            Text(days == 1 ? "Every day" : "Every \(days) days").tag(days)
+                        }
+                    }
+                }
+                Button(list.paused ? "Resume" : "Pause") {
+                    Task { await store.setPaused(!list.paused, on: list) }
+                }
+                Button("Delete list", role: .destructive) {
+                    Task { await store.delete(list) }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 44, height: 32)
+                    .contentShape(.rect)
+            }
+        }
+        .foregroundStyle(list.paused ? theme.textMuted : theme.textSubtle)
+        .padding(.horizontal, 6)
+    }
+
+    private var cadenceBinding: Binding<Int> {
+        Binding(
+            get: { list.everyDays ?? 4 },
+            set: { days in Task { await store.setCadence(days, on: list) } }
+        )
+    }
+}
+
+/// A new list. One-off lists ask for a date; repeating ones ask for a cadence.
+private struct NewListSheet: View {
+    @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss
+    let onCreate: (String, Bool, Int?, String?) -> Void
+
+    @State private var name = ""
+    @State private var once = false
+    @State private var everyDays = 4
+    @State private var runOn = Date()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("What is this list for?", text: $name)
+                }
+                Section {
+                    Picker("Kind", selection: $once) {
+                        Text("Repeating").tag(false)
+                        Text("One-off").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+
+                    if once {
+                        DatePicker("On", selection: $runOn, displayedComponents: .date)
+                    } else {
+                        Stepper(
+                            everyDays == 1 ? "Every day" : "Every \(everyDays) days",
+                            value: $everyDays, in: 1...30
+                        )
+                    }
+                } footer: {
+                    Text(
+                        "A schedule says when the agent should try. Your rule still "
+                      + "decides what it may buy."
+                    )
+                }
+            }
+            .navigationTitle("New list")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") {
+                        onCreate(
+                            name, once,
+                            once ? nil : everyDays,
+                            once ? Self.iso.string(from: runOn) : nil
+                        )
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+
+    private static let iso: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+}
 /// Adding an item searches every shop, so the price the user is committing to
 /// is visible before they commit — and so is the fact that the cheap one is
 /// somewhere their rule does not reach.

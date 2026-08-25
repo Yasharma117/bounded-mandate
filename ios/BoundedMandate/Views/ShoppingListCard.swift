@@ -51,7 +51,7 @@ struct ShoppingListCard: View {
                     .foregroundStyle(meterColor)
                 Eyebrow(text: list.name, color: meterColor)
                 Spacer()
-                Text(list.merchant)
+                Text(list.spent ? "ordered" : list.merchant)
                     .font(.system(size: 12))
                     .foregroundStyle(theme.textMuted)
             }

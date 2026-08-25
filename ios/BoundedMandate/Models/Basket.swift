@@ -24,7 +24,7 @@ struct ListItem: Codable, Hashable, Sendable, Identifiable {
 /// This is the second thing the user owns and it is not the policy. The policy
 /// bounds *how much*; the list defines *what*. The agent reads it and has no
 /// tool that can write it.
-struct ShoppingList: Codable, Hashable, Sendable {
+struct ShoppingList: Codable, Hashable, Sendable, Identifiable {
     let listID: String
     let name: String
     let merchant: String
@@ -32,6 +32,20 @@ struct ShoppingList: Codable, Hashable, Sendable {
     let totalPaise: Int
     let capPaise: Int
     let unstocked: [String]
+
+    /// `standing` repeats; `once` runs on a date and is then spent.
+    let kind: String
+    let everyDays: Int?
+    let paused: Bool
+    let spent: Bool
+    let due: Bool
+    let lastRunAt: String?
+    let nextDueAt: String?
+    /// When this runs, phrased server-side — "Every 4 days", "Once, on 8 Nov".
+    let schedule: String
+
+    var id: String { listID }
+    var isOneOff: Bool { kind == "once" }
 
     /// How much of the per-order cap this list would consume. Over 1 means the
     /// list as written cannot clear the policy, which the user should see
@@ -46,10 +60,55 @@ struct ShoppingList: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case listID = "list_id"
-        case name, merchant, items
+        case name, merchant, items, kind, paused, spent, due, schedule, unstocked
         case totalPaise = "total_paise"
         case capPaise = "cap_paise"
-        case unstocked
+        case everyDays = "every_days"
+        case lastRunAt = "last_run_at"
+        case nextDueAt = "next_due_at"
+    }
+
+    init(from decoder: any Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        listID = try box.decode(String.self, forKey: .listID)
+        name = try box.decode(String.self, forKey: .name)
+        merchant = try box.decode(String.self, forKey: .merchant)
+        items = try box.decode([ListItem].self, forKey: .items)
+        totalPaise = try box.decode(Int.self, forKey: .totalPaise)
+        capPaise = try box.decode(Int.self, forKey: .capPaise)
+        unstocked = try box.decodeIfPresent([String].self, forKey: .unstocked) ?? []
+        kind = try box.decodeIfPresent(String.self, forKey: .kind) ?? "standing"
+        everyDays = try box.decodeIfPresent(Int.self, forKey: .everyDays)
+        paused = try box.decodeIfPresent(Bool.self, forKey: .paused) ?? false
+        spent = try box.decodeIfPresent(Bool.self, forKey: .spent) ?? false
+        due = try box.decodeIfPresent(Bool.self, forKey: .due) ?? false
+        lastRunAt = try box.decodeIfPresent(String.self, forKey: .lastRunAt)
+        nextDueAt = try box.decodeIfPresent(String.self, forKey: .nextDueAt)
+        schedule = try box.decodeIfPresent(String.self, forKey: .schedule) ?? ""
+    }
+
+    init(
+        listID: String, name: String, merchant: String, items: [ListItem],
+        totalPaise: Int, capPaise: Int, unstocked: [String],
+        kind: String = "standing", everyDays: Int? = nil, paused: Bool = false,
+        spent: Bool = false, due: Bool = false, lastRunAt: String? = nil,
+        nextDueAt: String? = nil, schedule: String = ""
+    ) {
+        self.listID = listID
+        self.name = name
+        self.merchant = merchant
+        self.items = items
+        self.totalPaise = totalPaise
+        self.capPaise = capPaise
+        self.unstocked = unstocked
+        self.kind = kind
+        self.everyDays = everyDays
+        self.paused = paused
+        self.spent = spent
+        self.due = due
+        self.lastRunAt = lastRunAt
+        self.nextDueAt = nextDueAt
+        self.schedule = schedule
     }
 }
 

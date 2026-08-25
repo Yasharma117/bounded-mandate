@@ -30,13 +30,46 @@ enum Engine {
         try await post("/api/agent", body: ["text": text, "adversarial": adversarial])
     }
 
+    /// Every list the user keeps, soonest-due first.
+    static func readLists() async throws -> [ShoppingList] {
+        struct Wrapper: Decodable { let lists: [ShoppingList] }
+        let wrapper: Wrapper = try await send("/api/lists", method: "GET")
+        return wrapper.lists
+    }
+
+    static func createList(
+        name: String, items: [String], once: Bool, everyDays: Int?, runOn: String?
+    ) async throws -> ShoppingList {
+        var body: [String: Any] = [
+            "name": name, "item_names": items, "kind": once ? "once" : "standing",
+        ]
+        if let everyDays { body["every_days"] = everyDays }
+        if let runOn { body["run_on"] = runOn }
+        return try await send("/api/lists", method: "POST", body: body)
+    }
+
+    static func deleteList(_ listID: String) async throws {
+        struct Gone: Decodable { let deleted: String }
+        let _: Gone = try await send("/api/list/\(listID)", method: "DELETE")
+    }
+
+    /// Change *when*, without restating *what*.
+    static func setSchedule(
+        _ listID: String, everyDays: Int? = nil, paused: Bool? = nil
+    ) async throws -> ShoppingList {
+        var body: [String: Any] = [:]
+        if let everyDays { body["every_days"] = everyDays }
+        if let paused { body["paused"] = paused }
+        return try await send("/api/list/\(listID)/schedule", method: "PUT", body: body)
+    }
+
     /// The user's list. Read freely; written only by the user.
     static func readList(_ listID: String = "usual") async throws -> ShoppingList {
         try await send("/api/list/\(listID)", method: "GET")
     }
 
     /// Replace the list. There is no agent path to this call — see `basket.py`.
-    static func writeList(_ listID: String = "usual", items: [String]) async throws -> ShoppingList {
+    static func writeList(_ listID: String, items: [String]) async throws -> ShoppingList {
         try await send("/api/list/\(listID)", method: "PUT", body: ["item_names": items])
     }
 
