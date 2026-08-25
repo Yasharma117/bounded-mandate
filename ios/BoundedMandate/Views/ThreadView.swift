@@ -161,6 +161,10 @@ struct ThreadView: View {
                 // the title, and a money figure half-visible behind a nav bar
                 // is worse than one that simply is not there yet.
                 .scrollEdgeEffectStyle(.hard, for: .top)
+                // The backdrop is behind the whole stack now, so everything in
+                // front of it has to actually be transparent or it paints over
+                // it — which showed up as a white page above the scrim.
+
                 .onChange(of: thread.messages.count) {
                     // Slightly behind the entrance, so the new thing is on
                     // screen by the time the scroll catches up to it.
@@ -171,6 +175,7 @@ struct ThreadView: View {
             }
             .background(backdrop)
             .navigationTitle("Bounded Mandate")
+
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingList = true } label: {
@@ -402,6 +407,13 @@ struct ThreadView: View {
             Backdrop(voiceness: voiceness, level: voice?.level ?? 0)
             Ripple(trigger: pulse, color: theme.primary)
         }
+        // As a plain `.background` this is sized to the scroll view's *content*
+        // area, which is inset about 34pt on each side — so the page showed
+        // through down both edges as a lighter rectangle the width of the
+        // thread. Overshooting covers it; ignoresSafeArea alone does not,
+        // because the inset is not safe area.
+        .padding(.horizontal, -80)
+        .ignoresSafeArea()
     }
 
     private func startTalking() {
