@@ -21,7 +21,7 @@ from .basket import ShoppingList
 from .engine import Decision, Policy, Proposal, decide
 from .ledger import Ledger
 from .llm import MODEL, default_client
-from .merchant import Marketplace
+from .merchant import Marketplace, UnknownMerchant
 
 MAX_TURNS = 16
 
@@ -195,6 +195,10 @@ class BuyerAgent:
             cart = self.marketplace.create_cart(
                 item_names, delivery_address=self.delivery_address, merchant=merchant
             )
+        except UnknownMerchant as exc:
+            # Actionable, and names the shops — a wrong shop name should cost
+            # one retry, not a flailing search of every item in the list.
+            return {"error": str(exc.args[0])}
         except KeyError as exc:
             return {"error": f"not stocked: {exc.args[0]}"}
         return {

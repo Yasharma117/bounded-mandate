@@ -31,7 +31,7 @@ from .basket import ShoppingList, seed_lists
 from .compiler import compile_mandate
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import Ledger
-from .merchant import Marketplace, UnknownItem
+from .merchant import Marketplace, UnknownItem, UnknownMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
 from .voice import VoiceUnavailable, speak, transcribe
 
@@ -245,6 +245,8 @@ def submit_proposal(body: ProposalRequest) -> dict:
     """A cart, proposed directly. The engine decides; only an ALLOW reaches the rail."""
     try:
         cart = MARKETPLACE.create_cart(body.items, delivery_address=HOME, merchant=body.merchant)
+    except UnknownMerchant as exc:
+        raise HTTPException(400, str(exc.args[0])) from exc
     except UnknownItem as exc:
         raise HTTPException(400, f"not stocked: {exc.args[0]}") from exc
 
@@ -462,7 +464,7 @@ def product_page(merchant: str, name: str) -> str:
     """
     try:
         item = MARKETPLACE[merchant].catalog[name]
-    except (UnknownItem, KeyError) as exc:
+    except (UnknownMerchant, UnknownItem, KeyError) as exc:
         raise HTTPException(404, "not stocked") from exc
     return (
         f"<!doctype html><meta charset=utf-8>"

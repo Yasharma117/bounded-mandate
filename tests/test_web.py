@@ -366,3 +366,30 @@ def test_a_product_link_actually_resolves(client):
 def test_an_unstocked_product_page_is_a_404(client):
     assert client.get("/m/instamart/p/Ferrari").status_code == 404
     assert client.get("/m/nosuchshop/p/Bananas%201kg").status_code == 404
+
+
+def test_the_agent_builds_from_the_edited_list_not_the_seeded_one(client, monkeypatch):
+    """The list is a source of truth for the *agent*, not only for the screen.
+
+    The user putting something off-scope on their own list is the interesting
+    case: the agent obeys the list, and the engine still refuses — because the
+    list says *what*, and the policy says *whether*.
+    """
+    client.put("/api/list/usual", json={"item_names": ["Toned milk 1L x2", "Smartwatch"]})
+
+    seen: dict = {}
+
+    class ListReadingAgent:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+        def run(self, _instruction, **_):
+            from bounded_mandate.agent import AgentRun
+
+            return AgentRun(instruction="x", said="done")
+
+    monkeypatch.setattr(web, "BuyerAgent", ListReadingAgent)
+    client.post("/api/agent", json={"text": "order my usual groceries"})
+
+    handed = seen["shopping_list"]
+    assert handed.item_names == ("Toned milk 1L x2", "Smartwatch")

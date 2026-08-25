@@ -5,7 +5,14 @@ from __future__ import annotations
 import pytest
 
 from bounded_mandate import Ledger, Proposal, Verdict, decide
-from bounded_mandate.merchant import CATALOG, USUAL_GROCERIES, MockMerchant, UnknownItem
+from bounded_mandate.merchant import (
+    CATALOG,
+    USUAL_GROCERIES,
+    Marketplace,
+    MockMerchant,
+    UnknownItem,
+    UnknownMerchant,
+)
 from tests.conftest import HOME, NOW
 
 ESCALATION_EXTRAS = ["Bluetooth earbuds", "Phone case"]
@@ -79,3 +86,32 @@ def test_honest_agent_on_the_same_merchant_is_allowed(policies, ledger: Ledger):
 
     assert decision.verdict is Verdict.ALLOW
     assert decision.reason_code == "ok.in_policy"
+
+
+def test_a_shop_name_is_matched_however_it_was_typed():
+    """People type shop names in sentences. "Instamart" and "instamart" are one
+    shop, and failing that lookup made the agent flail through the whole list."""
+    market = Marketplace()
+    assert market["Instamart"] is market["instamart"]
+    assert market["BLINKIT"] is market["blinkit"]
+
+
+def test_normalising_the_lookup_cannot_widen_an_allowlist():
+    """Only the lookup is case-insensitive. The cart records the canonical name,
+    so what the engine compares against `policy.merchants` is unchanged."""
+    market = Marketplace()
+    cart = market.create_cart(["Bananas 1kg"], delivery_address="HOME", merchant="BLINKIT")
+    assert cart.merchant == "blinkit"
+    assert cart.cart_id.startswith("blinkit_")
+
+
+def test_an_unknown_shop_says_which_shops_exist():
+    """A typo in a shop name and a thing nobody sells are different problems,
+    and the agent needs different words back for each."""
+    market = Marketplace()
+    with pytest.raises(UnknownMerchant) as caught:
+        market["tesco"]
+    assert "instamart" in str(caught.value)
+
+    with pytest.raises(UnknownItem):
+        market["instamart"].create_cart(["Ferrari"], delivery_address=HOME)

@@ -71,6 +71,12 @@ class UnknownItem(KeyError):
     """Asked for something the merchant does not stock."""
 
 
+class UnknownMerchant(KeyError):
+    """Asked for a shop that does not exist. Distinct from an unstocked item,
+    because the two need different words back — one is a typo, the other is a
+    thing nobody sells."""
+
+
 MERCHANT_NAME = "instamart"
 
 
@@ -189,10 +195,18 @@ class Marketplace:
         }
 
     def __getitem__(self, merchant: str) -> MockMerchant:
-        try:
-            return self.merchants[merchant]
-        except KeyError as exc:
-            raise UnknownItem(f"no such merchant: {merchant}") from exc
+        """Case-insensitive, because a shop name is something a person types in
+        a sentence — "Instamart" and "instamart" are one shop.
+
+        Only the *lookup* is normalised. The cart still records the canonical
+        name, so what the engine checks against the policy is unchanged: this
+        cannot widen an allowlist, only spell one correctly.
+        """
+        found = self.merchants.get(merchant) or self.merchants.get(merchant.casefold())
+        if found is None:
+            known = ", ".join(sorted(self.merchants))
+            raise UnknownMerchant(f"no such shop: {merchant}. Shops are: {known}")
+        return found
 
     def search(self, query: str) -> list[Offer]:
         """Every seller's answer, cheapest first within each product."""
