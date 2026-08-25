@@ -19,7 +19,7 @@ real. Put it behind a socket if the demo needs to *look* independent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import count
 
 from .basket import USUAL_GROCERIES as USUAL_GROCERIES  # re-export; the list is the user's
@@ -141,10 +141,21 @@ class MockMerchant:
         q = query.casefold()
         return [i for i in self.catalog.values() if q in i.name.casefold() or q == i.category]
 
-    def create_cart(self, item_names: list[str], *, delivery_address: str) -> Cart:
+    def create_cart(
+        self, item_names: list[str], *, delivery_address: str, categories: dict | None = None
+    ) -> Cart:
         """Build and store a cart. Returns it, but the id is what travels."""
         try:
-            items = tuple(self.catalog[name] for name in item_names)
+            assigned = categories or {}
+            items = tuple(
+                # A user-set category beats the merchant's own. The mock is
+                # truthful, so this rarely differs — but the rule has to be the
+                # same on both backends or the tests prove nothing about live.
+                replace(self.catalog[name], category=assigned[name])
+                if assigned.get(name)
+                else self.catalog[name]
+                for name in item_names
+            )
         except KeyError as exc:
             raise UnknownItem(*exc.args) from exc
         # Merchant-prefixed, so the marketplace can route a bare id back to the
@@ -217,8 +228,17 @@ class Marketplace:
         ]
         return sorted(offers, key=lambda o: (o.item.name, o.item.price_paise))
 
-    def create_cart(self, item_names: list[str], *, delivery_address: str, merchant: str) -> Cart:
-        return self[merchant].create_cart(item_names, delivery_address=delivery_address)
+    def create_cart(
+        self,
+        item_names: list[str],
+        *,
+        delivery_address: str,
+        merchant: str,
+        categories: dict | None = None,
+    ) -> Cart:
+        return self[merchant].create_cart(
+            item_names, delivery_address=delivery_address, categories=categories
+        )
 
     def fetch_cart(self, cart_id: str) -> Cart | None:
         """Route on the id prefix. An unknown seller is a miss, not a crash —

@@ -20,7 +20,7 @@ policy — an escalation that never trips a bound.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 
@@ -39,6 +39,19 @@ class ShoppingList:
     list_id: str
     name: str
     item_names: tuple[str, ...]
+    #: What kind of thing each line is, as **the user** classified it.
+    #:
+    #: Swiggy returns no category on any endpoint, and the engine reads a blank
+    #: category as CLARIFY — so on live data every line would stop and ask. The
+    #: answer is not to guess: it is that the person who curated this list
+    #: already knows what is on it. The list is a document the agent cannot
+    #: write, which is exactly the property that makes it safe to be the source
+    #: of *what kind of thing* as well as *what*.
+    #:
+    #: A user can of course mis-classify and widen their own scope. That is
+    #: their authority, the same as editing their own cap, and it is written
+    #: down somewhere they can read it.
+    categories: dict[str, str] = field(default_factory=dict)
     kind: ListKind = ListKind.STANDING
     #: Standing lists only. `None` means the user has not set a cadence, so the
     #: list never runs on its own — it is a reference they order from by hand.
@@ -49,8 +62,16 @@ class ShoppingList:
     last_run_at: datetime | None = None
     paused: bool = False
 
+    def category_of(self, item_name: str) -> str:
+        """The user's classification for this line, or `""` if they never said."""
+        return self.categories.get(item_name, "")
+
     def without(self, item_name: str) -> ShoppingList:
-        return replace(self, item_names=tuple(n for n in self.item_names if n != item_name))
+        return replace(
+            self,
+            item_names=tuple(n for n in self.item_names if n != item_name),
+            categories={k: v for k, v in self.categories.items() if k != item_name},
+        )
 
     def with_item(self, item_name: str) -> ShoppingList:
         """Appending an item the list already holds is a no-op, not a duplicate."""
@@ -118,6 +139,7 @@ def seed_lists() -> dict[str, ShoppingList]:
             list_id="usual",
             name="My usual groceries",
             item_names=USUAL_GROCERIES,
+            categories=dict.fromkeys(USUAL_GROCERIES, "groceries"),
             kind=ListKind.STANDING,
             every_days=4,
         ),
@@ -125,6 +147,7 @@ def seed_lists() -> dict[str, ShoppingList]:
             list_id="breakfast",
             name="Breakfast top-up",
             item_names=("Toned milk 1L x2", "Eggs (12)", "Brown bread"),
+            categories=dict.fromkeys(("Toned milk 1L x2", "Eggs (12)", "Brown bread"), "groceries"),
             kind=ListKind.STANDING,
             every_days=2,
         ),

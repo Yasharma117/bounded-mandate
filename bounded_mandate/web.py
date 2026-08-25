@@ -31,7 +31,9 @@ from pydantic import BaseModel, Field
 
 from .agent import ADVERSARIAL_SYSTEM, BuyerAgent
 from .basket import ListKind, ShoppingList, seed_lists
+from .categories import with_fees
 from .commerce import build as build_commerce
+from .commerce import is_live
 from .compiler import compile_mandate
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import Ledger
@@ -75,7 +77,7 @@ POLICIES: dict[str, Policy] = {
         mandate_id="mdt_demo",
         per_txn_max_paise=200_000,
         merchants=frozenset({"instamart"}),
-        categories=frozenset({"groceries"}),
+        categories=with_fees({"groceries"}),
         delivery_addresses=frozenset({HOME}),
         max_charges_per_window=1,
         window_days=4,
@@ -479,21 +481,34 @@ def _offer_rows(query: str) -> list[dict]:
 
 @app.get("/api/catalog")
 def catalog(q: str = "") -> dict:
-    """Cross-merchant search. The same product from three sellers at three
-    prices, and — separately — whether the shop and the category are covered."""
-    return {"offers": _offer_rows(q)}
+    """Cross-merchant search, and whether each shop and category is covered.
+
+    Mock only. Swiggy is Instamart alone, so on the live path there is no second
+    shop to compare against and the card would be asserting a comparison nobody
+    made. `comparable` says which it is rather than leaving the app to guess.
+    """
+    return {"offers": _offer_rows(q), "live": is_live(), "comparable": not is_live()}
 
 
 def _list_rows(shopping: ShoppingList) -> dict:
-    """The list, priced at the merchant the mandate allows."""
+    """The list, priced at the merchant the mandate allows.
+
+    Pricing reads the mock's local catalog. On the live path there is no local
+    catalog — a price means a `search_products` call per line, which is a dozen
+    round trips to render one screen — so live lists show names and categories
+    without prices rather than pretending to a total nobody fetched.
+    """
     policy = POLICIES["mdt_demo"]
     seller = next(iter(policy.merchants))
-    catalog = MARKETPLACE[seller].catalog
+    catalog = {} if is_live() else MARKETPLACE[seller].catalog
     items = [
         {
             "name": name,
             "price_paise": catalog[name].price_paise if name in catalog else None,
-            "category": catalog[name].category if name in catalog else "",
+            # The user's own classification, not the merchant's. On the live
+            # path it is the only one there is.
+            "category": shopping.category_of(name)
+            or (catalog[name].category if name in catalog else ""),
             "url": f"/m/{seller}/p/{quote(name)}",
         }
         for name in shopping.item_names
@@ -631,6 +646,11 @@ def read_list(list_id: str) -> dict:
 
 class ListEdit(BaseModel):
     item_names: list[str] = Field(description="The list, in the order the user wants it")
+    categories: dict[str, str] | None = Field(
+        default=None,
+        description="What kind of thing each line is. The user's call, and the "
+        "only classification Swiggy will not give us.",
+    )
 
 
 @app.put("/api/list/{list_id}")
@@ -645,7 +665,15 @@ def write_list(list_id: str, body: ListEdit) -> dict:
     unknown = [n for n in body.item_names if n not in MARKETPLACE["instamart"].catalog]
     if unknown:
         raise HTTPException(400, f"not stocked: {', '.join(unknown)}")
-    LISTS[list_id] = replace(shopping, item_names=tuple(body.item_names))
+    kept = {
+        name: (body.categories or {}).get(name) or shopping.category_of(name)
+        for name in body.item_names
+    }
+    LISTS[list_id] = replace(
+        shopping,
+        item_names=tuple(body.item_names),
+        categories={name: category for name, category in kept.items() if category},
+    )
     return _list_rows(LISTS[list_id])
 
 

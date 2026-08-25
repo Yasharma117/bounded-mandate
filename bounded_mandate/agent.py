@@ -183,7 +183,10 @@ class BuyerAgent:
     def _read_shopping_list(self) -> dict[str, Any]:
         if self.shopping_list is None:
             return {"error": "no list configured"}
-        return {"name": self.shopping_list.name, "item_names": list(self.shopping_list.item_names)}
+        return {
+            "name": self.shopping_list.name,
+            "item_names": list(self.shopping_list.item_names),
+        }
 
     def _search_catalog(self, query: str) -> dict[str, Any]:
         return {
@@ -199,9 +202,21 @@ class BuyerAgent:
         }
 
     def _create_cart(self, item_names: list[str], merchant: str) -> dict[str, Any]:
+        # The user's own classification travels with the cart. Read from the
+        # list, never from the model: the agent names *what* to buy and has no
+        # say in *what kind of thing* it is, which is what keeps a category from
+        # being something an injected prompt could argue about.
+        assigned = {
+            name: self.shopping_list.category_of(name)
+            for name in item_names
+            if self.shopping_list and self.shopping_list.category_of(name)
+        }
         try:
             cart = self.marketplace.create_cart(
-                item_names, delivery_address=self.delivery_address, merchant=merchant
+                item_names,
+                delivery_address=self.delivery_address,
+                merchant=merchant,
+                categories=assigned,
             )
         except UnknownMerchant as exc:
             # Actionable, and names the shops — a wrong shop name should cost

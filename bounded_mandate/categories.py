@@ -19,6 +19,26 @@ the merchant or from us.
 
 from __future__ import annotations
 
+#: The category the Swiggy adapter stamps on bill lines that are a charge rather
+#: than a good. Every policy allows it — see `with_fees` — because a delivery fee
+#: is not a discretionary purchase the user authorises separately, it is the cost
+#: of the delivery they already authorised.
+#:
+#: `categorise` never returns this. Only the adapter may mint such a line, or a
+#: merchant could get an item classified into a category every policy accepts.
+FEES = "fees"
+
+
+def with_fees(categories) -> frozenset[str]:
+    """The categories a policy allows, plus fees.
+
+    In one place on purpose. Three call sites each remembering to union a
+    constant is three places for it to be forgotten, and the one that forgets
+    turns every real order into an escalation about a ₹35 delivery charge.
+    """
+    return frozenset(categories) | {FEES}
+
+
 # Substrings, lower-cased, checked against the product name. Ordered most
 # specific first — "coconut oil" is groceries, "engine oil" would not be, and
 # the table should never have to guess which one "oil" meant.

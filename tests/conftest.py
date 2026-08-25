@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from bounded_mandate import Cart, CartItem, Ledger, MandateStatus, Policy
+from bounded_mandate.categories import with_fees
 from bounded_mandate.merchant import MockMerchant
 
 NOW = datetime(2026, 8, 24, 9, 41, tzinfo=UTC)
@@ -34,7 +35,7 @@ def policy() -> Policy:
         mandate_id="mdt_1",
         per_txn_max_paise=200_000,  # ₹2,000
         merchants=frozenset({"instamart"}),
-        categories=frozenset({"groceries"}),
+        categories=with_fees({"groceries"}),
         delivery_addresses=frozenset({HOME}),
         max_charges_per_window=2,
         window_days=7,

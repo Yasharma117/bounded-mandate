@@ -41,11 +41,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
+from .categories import FEES as FEES_CATEGORY
 from .categories import categorise
 from .engine import Cart, CartItem
 from .merchant import UnknownItem
 
 MERCHANT_NAME = "instamart"
+
+#: Bill lines that are the goods themselves rather than a charge on top. Swiggy
+#: itemises both in the same array.
+_ITEM_TOTAL_LABELS = frozenset({"item total", "items total", "mrp total", "subtotal"})
 
 #: Every tool this adapter is allowed to name. `checkout` and `confirm_order`
 #: exist on the Instamart server and are deliberately not here; the firewall
@@ -163,6 +168,16 @@ class SwiggyAdapter:
     def __init__(self, call: CallTool, *, address_id: str | None = None) -> None:
         self._call = call
         self._address_id = address_id or ADDRESS_ID
+        #: What the user's list said about the lines in the current cart, pinned
+        #: when the cart was built.
+        #:
+        #: `fetch_cart` is the engine's path and has no list to consult — it is
+        #: handed a cart id and nothing else. Without this it would re-derive
+        #: categories from the substring lookup, get different ones than the
+        #: build did, hash to a different id, and refuse the engine's own cart.
+        #: Pinning them means the classification the user asserted is the one
+        #: the policy is checked against.
+        self._assigned: dict[str, str] = {}
 
     # --- agent-facing -------------------------------------------------------
 
@@ -204,7 +219,14 @@ class SwiggyAdapter:
                 )
         return offers
 
-    def create_cart(self, item_names: list[str], *, delivery_address: str = "") -> Cart:
+    def create_cart(
+        self,
+        item_names: list[str],
+        *,
+        delivery_address: str = "",
+        merchant: str = MERCHANT_NAME,
+        categories: dict | None = None,
+    ) -> Cart:
         """Build a cart from item *names*, which is what the agent's tool takes.
 
         The agent says "Toned milk 1L"; `update_cart` wants a `skuId`. Resolving
@@ -223,7 +245,7 @@ class SwiggyAdapter:
             if match is None:
                 raise UnknownItem(name)
             chosen.append((match.sku_id, 1))
-        return self.build_cart(chosen).cart
+        return self.build_cart(chosen, categories=categories).cart
 
     def _best_match(self, name: str) -> Offer | None:
         """Cheapest in-stock variation whose name contains the query.
@@ -239,7 +261,9 @@ class SwiggyAdapter:
         exact = [o for o in offers if wanted in o.name.casefold()]
         return min(exact or offers, key=lambda o: o.price_paise)
 
-    def build_cart(self, items: list[tuple[str, int]]) -> CartReport:
+    def build_cart(
+        self, items: list[tuple[str, int]], *, categories: dict | None = None
+    ) -> CartReport:
         """Replace the session cart with exactly these `(sku_id, quantity)`.
 
         Replacement is the documented behaviour of `update_cart`, so the adapter
@@ -250,16 +274,24 @@ class SwiggyAdapter:
             selectedAddressId=self.address_id(),
             items=[{"skuId": sku, "quantity": qty} for sku, qty in items],
         )
+        self._assigned = dict(categories or {})
         return self.read_cart()
 
     def clear(self) -> None:
         self._invoke("clear_cart")
+        self._assigned = {}
 
     # --- engine-facing ------------------------------------------------------
 
-    def read_cart(self) -> CartReport:
-        """The canonical cart, as Swiggy currently holds it."""
+    def read_cart(self, categories: dict[str, str] | None = None) -> CartReport:
+        """The canonical cart, as Swiggy currently holds it.
+
+        `categories` is the user's own classification, keyed by the name they
+        asked for — see `create_cart`. It wins over the substring lookup, and
+        the lookup wins over nothing at all.
+        """
         payload = self._invoke("get_cart")
+        assigned = self._assigned if categories is None else categories
         items: list[CartItem] = []
         for line in payload.get("items") or []:
             name = line.get("displayName") or line.get("name") or ""
@@ -270,10 +302,26 @@ class SwiggyAdapter:
             # A line is a quantity of a thing; the engine sums line totals.
             quantity = int(line.get("quantity") or 1)
             items.append(
-                CartItem(name=name, price_paise=unit * quantity, category=categorise(name))
+                CartItem(
+                    name=name,
+                    price_paise=unit * quantity,
+                    category=_category_for(name, assigned),
+                )
             )
 
         total = to_paise(_total_from(payload))
+
+        # Fees become lines, because the cap checks the sum of lines and the
+        # user is charged `toPay`. Left out, delivery and handling are money the
+        # engine never sees — a basket under the cap, charged over it.
+        items.extend(_fee_lines(payload))
+
+        charged = sum(item.price_paise for item in items)
+        if charged != total:
+            raise SwiggyUnavailable(
+                f"this cart does not add up: lines total ₹{charged / 100:,.2f}, "
+                f"Swiggy will charge ₹{total / 100:,.2f}"
+            )
         address = (payload.get("selectedAddressDetails") or {}).get("address") or payload.get(
             "selectedAddress"
         )
@@ -314,6 +362,41 @@ class SwiggyAdapter:
         except Exception as exc:
             raise SwiggyUnavailable(f"{tool} failed: {exc}") from exc
         return result if isinstance(result, dict) else {}
+
+
+def _category_for(name: str, assigned: dict[str, str]) -> str:
+    """List first, lookup second, blank last.
+
+    Only the first is authoritative. The user curated the list; the lookup is a
+    convenience for things they never named; and blank makes the engine ask,
+    which is the right answer when nobody has actually said.
+    """
+    for requested, category in assigned.items():
+        if requested.casefold() in name.casefold() and category:
+            return category
+    return categorise(name)
+
+
+def _fee_lines(payload: dict) -> list[CartItem]:
+    """Everything on the bill that is a charge rather than a good.
+
+    Swiggy itemises fees alongside the item total in the same array, so the
+    labels are Swiggy's own and the card can print "Delivery fee ₹35" as a line
+    the reader recognises.
+    """
+    breakdown = payload.get("billBreakdown") or {}
+    lines: list[CartItem] = []
+    for entry in breakdown.get("lineItems") or []:
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("label") or "").strip()
+        if not label or label.casefold() in _ITEM_TOTAL_LABELS:
+            continue
+        charge = to_paise(entry.get("value"))
+        if charge == 0:
+            continue  # a free delivery is not a line worth showing
+        lines.append(CartItem(name=label, price_paise=charge, category=FEES_CATEGORY))
+    return lines
 
 
 def _total_from(payload: dict) -> object:

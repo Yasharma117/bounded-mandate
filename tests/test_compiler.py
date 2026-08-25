@@ -57,7 +57,9 @@ def test_sentence_becomes_an_enforceable_contract():
     assert policy is not None
     assert policy.per_txn_max_paise == 200_000  # ₹2,000, in paise
     assert policy.merchants == frozenset({"instamart"})
-    assert policy.categories == frozenset({"groceries"})
+    # Fees ride along by construction: a delivery charge is the cost of the
+    # delivery already authorised, and leaving it out put it outside the cap.
+    assert policy.categories == frozenset({"groceries", "fees"})
 
 
 def test_cadence_compiles_to_a_frequency_ceiling():
@@ -94,7 +96,7 @@ def test_provider_outage_still_compiles_the_demo_sentence():
     assert compiled.policy is not None
     assert compiled.policy.per_txn_max_paise == 200_000
     assert compiled.policy.merchants == frozenset({"instamart"})
-    assert compiled.policy.categories == frozenset({"groceries"})
+    assert compiled.policy.categories == frozenset({"groceries", "fees"})
     assert compiled.policy.window_days == 4
 
 

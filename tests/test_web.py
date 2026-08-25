@@ -571,3 +571,29 @@ def test_the_scheduler_is_off_unless_it_is_switched_on(monkeypatch):
     with TestClient(web.app) as running:
         running.get("/api/lists")
         assert not hasattr(running.app.state, "scheduler")
+
+
+def test_a_list_line_carries_the_users_own_category(client):
+    body = client.get("/api/list/usual").json()
+    assert all(i["category"] == "groceries" for i in body["items"])
+
+
+def test_editing_a_list_keeps_the_categories_of_lines_it_kept(client):
+    """Reclassifying every line on every edit would be busywork the user did
+    not ask for, and forgetting one turns a silent run into an escalation."""
+    keep = list(USUAL_GROCERIES)[:3]
+    body = client.put("/api/list/usual", json={"item_names": keep}).json()
+    assert all(i["category"] == "groceries" for i in body["items"])
+
+
+def test_a_user_can_reclassify_a_line(client):
+    """Their authority, the same as editing their own cap — and written down
+    where they can read it."""
+    body = client.put(
+        "/api/list/usual",
+        json={
+            "item_names": ["Cow ghee 500ml"],
+            "categories": {"Cow ghee 500ml": "household"},
+        },
+    ).json()
+    assert body["items"][0]["category"] == "household"

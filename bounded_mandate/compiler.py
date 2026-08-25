@@ -24,6 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .categories import with_fees
 from .engine import MandateStatus, Policy
 from .llm import complete_json
 
@@ -68,7 +69,7 @@ class MandateDraft(BaseModel):
             mandate_id=mandate_id,
             per_txn_max_paise=self.per_txn_max_paise,
             merchants=frozenset(self.merchants),
-            categories=frozenset(self.categories),
+            categories=with_fees(self.categories),
             delivery_addresses=delivery_addresses,
             # "every 4 days" is one authorised order per 4-day window. Cadence
             # and frequency ceiling are the same bound seen from two sides.

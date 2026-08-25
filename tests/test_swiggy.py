@@ -382,3 +382,170 @@ class TestFirewallHoldsThroughTheApp:
                 if f'"{wire}"' in code:
                     offenders.append(f"{path.name}:{wire}")
         assert not offenders, f"a checkout tool is named in: {offenders}"
+
+
+# --- the money bug ----------------------------------------------------------
+
+
+class TestFeesAreInsideTheCap:
+    """`Cart.total_paise` sums item lines, and that is what the cap checks. A
+    fee that never becomes a line is a charge the engine never sees."""
+
+    FEE_CART = {
+        "items": [
+            {"displayName": "Aashirvaad Atta 5kg", "discountedFinalPrice": "1990", "quantity": 1}
+        ],
+        "billBreakdown": {
+            "lineItems": [
+                {"label": "Item total", "value": "1990"},
+                {"label": "Delivery fee", "value": "60"},
+            ],
+            "toPay": "2050",
+        },
+        "selectedAddressDetails": {"address": "12 Nandidurga Rd, Bengaluru"},
+    }
+
+    def adapter(self, payload):
+        return SwiggyAdapter(lambda tool, **_: payload, address_id="addr_1")
+
+    def test_the_cart_adds_up_to_what_will_actually_be_charged(self):
+        cart = self.adapter(self.FEE_CART).read_cart().cart
+        assert cart.total_paise == 205_000, "the fee is outside the total the engine checks"
+
+    def test_a_basket_under_the_cap_but_over_it_after_fees_is_caught(
+        self, policy, policies, ledger
+    ):
+        """₹1,990 of groceries under a ₹2,000 cap, charged ₹2,050. Before the
+        fee became a line the engine allowed this."""
+        from tests.conftest import merchant_holding
+
+        cart = self.adapter(self.FEE_CART).read_cart().cart
+        decision = decide(
+            Proposal(policy.mandate_id, cart.cart_id, cart.total_paise),
+            policies=policies,
+            adapter=merchant_holding(cart),
+            ledger=ledger,
+            now=NOW,
+        )
+        assert "cap.exceeded" in decision.reason_code
+        assert decision.verdict is not Verdict.ALLOW
+
+    def test_a_fee_line_does_not_read_as_an_off_scope_purchase(self, policy, policies, ledger):
+        """Fees are the cost of the delivery already authorised, not a
+        discretionary purchase — but they must not be a hole either, which the
+        test above proves by still tripping the cap."""
+        from tests.conftest import merchant_holding
+
+        cart = self.adapter(self.FEE_CART).read_cart().cart
+        fees = [i for i in cart.items if i.category == "fees"]
+        assert fees, "the fee never became a line"
+        assert all(i.category for i in cart.items), "a fee line must not read as unclassified"
+
+        decision = decide(
+            Proposal(policy.mandate_id, cart.cart_id, cart.total_paise),
+            policies=policies,
+            adapter=merchant_holding(cart),
+            ledger=ledger,
+            now=NOW,
+        )
+        assert "category.not_allowed" not in decision.reason_code
+        assert "category.unknown" not in decision.reason_code
+
+    def test_nothing_but_the_adapter_may_mint_a_fee_line(self):
+        """A merchant that could get an item classified as `fees` would have
+        found a category every policy allows."""
+        for name in ("Delivery fee", "Handling fee", "fees", "Platform fee"):
+            assert categorise(name) != "fees"
+
+    def test_a_cart_whose_parts_do_not_sum_to_its_total_is_refused(self):
+        """Independent of fees: a quantity mishandled or a line silently
+        dropped leaves a cart that does not add up, and that is not a cart this
+        engine should authorise."""
+        broken = json.loads(json.dumps(self.FEE_CART))
+        broken["billBreakdown"]["toPay"] = "9999"
+        with pytest.raises(SwiggyUnavailable, match="does not add up"):
+            self.adapter(broken).read_cart()
+
+
+# --- category comes from the user, not the merchant or a model --------------
+
+
+class TestCategoryFromTheList:
+    CART = {
+        "items": [
+            {"displayName": "Nandini Good Life UHT", "discountedFinalPrice": "54", "quantity": 1}
+        ],
+        "billBreakdown": {"lineItems": [{"label": "Item total", "value": "54"}], "toPay": "54"},
+        "selectedAddressDetails": {"address": "12 Nandidurga Rd, Bengaluru"},
+    }
+    SEARCH = {
+        "products": [
+            {
+                "displayName": "Nandini Good Life UHT",
+                "variations": [
+                    {
+                        "skuId": "S1",
+                        "quantityDescription": "",
+                        "price": {"offerPrice": 54},
+                        "isInStockAndAvailable": True,
+                    }
+                ],
+            }
+        ]
+    }
+
+    def adapter(self):
+        return SwiggyAdapter(
+            lambda tool, **_: self.SEARCH if tool == "search_products" else self.CART,
+            address_id="addr_1",
+        )
+
+    def test_the_lookup_alone_would_have_stopped_this_order(self):
+        """A brand-led name with no category word in it. This is the case that
+        breaks the unattended run, and the reason the list exists."""
+        assert categorise("Nandini Good Life UHT") == ""
+
+    def test_the_users_classification_wins(self):
+        cart = self.adapter().create_cart(
+            ["Nandini Good Life UHT"], categories={"Nandini Good Life UHT": "groceries"}
+        )
+        assert cart.items[0].category == "groceries"
+
+    def test_the_engine_can_still_refetch_the_cart_it_was_given(self):
+        """The categories are part of the content hash, and `fetch_cart` has no
+        list to consult — so they are pinned at build time. Without that the
+        engine re-derives different ones and refuses its own cart."""
+        adapter = self.adapter()
+        built = adapter.create_cart(
+            ["Nandini Good Life UHT"], categories={"Nandini Good Life UHT": "groceries"}
+        )
+        refetched = adapter.fetch_cart(built.cart_id)
+        assert refetched is not None, "the engine could not refetch its own cart"
+        assert refetched.items[0].category == "groceries"
+
+    def test_an_unclassified_line_still_reaches_clarify(self):
+        """Off-list items get the lookup, then nothing. Interrupting is the
+        cheap failure; silently authorising the wrong thing is the expensive
+        one."""
+        cart = self.adapter().create_cart(["Nandini Good Life UHT"])
+        assert cart.items[0].category == ""
+
+    def test_no_agent_tool_takes_a_category_as_input(self):
+        """The agent names *what* to buy. *What kind of thing* it is comes off a
+        document it cannot write, so an injected prompt has nothing to argue
+        with. Searching by category is fine — that is a query, not a claim."""
+        from bounded_mandate.agent import TOOLS
+
+        for tool in TOOLS:
+            params = tool["function"].get("parameters", {}).get("properties", {})
+            assert not [k for k in params if "categor" in k.lower()], (
+                f"{tool['function']['name']} lets the agent assert a category"
+            )
+
+
+class TestMoneyFormatIsConfirmed:
+    def test_rupees_with_paise_as_decimals(self):
+        """Confirmed format, not an assumption: Swiggy returns `₹1500.15`."""
+        assert to_paise("₹1500.15") == 150_015
+        assert to_paise("1500.15") == 150_015
+        assert to_paise(1500.15) == 150_015
