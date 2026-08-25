@@ -32,9 +32,18 @@ class VoiceUnavailable(RuntimeError):
 
 
 def _headers() -> dict[str, str]:
-    key = os.environ.get("ELEVENLABS_API_KEY", "")
+    key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
     if not key:
         raise VoiceUnavailable("ELEVENLABS_API_KEY is not configured")
+    # The dashboard shows a key *ID* beside the key, and pasting the ID gets a
+    # 400 from ElevenLabs that reads like a wiring problem rather than a typo.
+    # Catch it here, where the message can name the fix.
+    if not key.startswith("sk_"):
+        raise VoiceUnavailable(
+            "ELEVENLABS_API_KEY looks like a key ID, not a key. Keys start with "
+            "'sk_' and are shown only once, when the key is created — create a "
+            "new one if it was not saved."
+        )
     return {"xi-api-key": key}
 
 

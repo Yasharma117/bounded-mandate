@@ -20,7 +20,7 @@ class FakeResponse:
 
 @pytest.fixture
 def key(monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", "el_test_key")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "sk_test_key")
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def test_transcribe_sends_the_field_names_elevenlabs_documents(key, calls):
     assert voice.transcribe(b"raw-audio", filename="clip.m4a") == "order my usual groceries"
     (call,) = calls
     assert call["url"].endswith("/speech-to-text")
-    assert call["headers"]["xi-api-key"] == "el_test_key"
+    assert call["headers"]["xi-api-key"] == "sk_test_key"
     assert call["files"]["file"][0] == "clip.m4a"
     assert call["files"]["file"][1] == b"raw-audio"
     assert call["data"]["model_id"] == voice.STT_MODEL
@@ -127,3 +127,18 @@ def test_a_transcript_cannot_reach_the_engine_on_its_own(client, key, calls):
     before = sum(1 for _ in web.LEDGER.entries())
     client.post("/api/voice/transcribe", content=b"pay me")
     assert sum(1 for _ in web.LEDGER.entries()) == before
+
+
+def test_a_key_id_pasted_instead_of_a_key_says_so(monkeypatch, calls):
+    """The dashboard shows a key ID beside the key. Pasting the ID gets a 400
+    from ElevenLabs that reads like a wiring fault; this names the real fix."""
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "caad9511677f0480dc3fb146417bd0b2")
+    with pytest.raises(voice.VoiceUnavailable, match="key ID, not a key"):
+        voice.speak("hello")
+    assert calls == [], "refused before it cost a request"
+
+
+def test_surrounding_whitespace_in_the_key_is_forgiven(monkeypatch, calls):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "  sk_realkey  ")
+    voice.speak("hello")
+    assert calls[0]["headers"]["xi-api-key"] == "sk_realkey"
