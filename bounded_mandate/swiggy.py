@@ -141,10 +141,26 @@ class CartReport:
     unserviceable: tuple[str, ...] = ()
     removed_out_of_stock: tuple[str, ...] = ()
     reduced_quantity: tuple[str, ...] = ()
+    #: `asked for -> got`, whenever the resolved product name differs from the
+    #: request. Reported flatly rather than judged.
+    #:
+    #: There is no rule here that decides whether the substitution matters,
+    #: because there cannot be one: "Milk" resolving to "Amul Toned Milk 1 L"
+    #: and to "Milk Frother Machine Deluxe Steel" are indistinguishable by name
+    #: length, word overlap or any other cheap signal. A heuristic that gets
+    #: that wrong is worse than none, because it manufactures confidence in the
+    #: cases it fails on. So every rename is listed, the cart card shows what
+    #: actually resolved, and the cap bounds what a bad substitution can cost.
+    substituted: tuple[tuple[str, str], ...] = ()
 
     @property
     def diverged(self) -> bool:
-        return bool(self.unserviceable or self.removed_out_of_stock or self.reduced_quantity)
+        return bool(
+            self.unserviceable
+            or self.removed_out_of_stock
+            or self.reduced_quantity
+            or self.substituted
+        )
 
 
 def cart_id_for(items: list[CartItem], total_paise: int) -> str:
@@ -178,6 +194,9 @@ class SwiggyAdapter:
         #: Pinning them means the classification the user asserted is the one
         #: the policy is checked against.
         self._assigned: dict[str, str] = {}
+        #: Where the product that ended up in the cart is not the product that
+        #: was asked for.
+        self._substituted: tuple[tuple[str, str], ...] = ()
 
     # --- agent-facing -------------------------------------------------------
 
@@ -239,13 +258,25 @@ class SwiggyAdapter:
         Letting a caller pass an address here would invent an authority this
         adapter does not have.
         """
+        requested = categories or {}
         chosen: list[tuple[str, int]] = []
+        resolved: dict[str, str] = {}
+        swaps: list[tuple[str, str]] = []
         for name in item_names:
             match = self._best_match(name)
             if match is None:
                 raise UnknownItem(name)
             chosen.append((match.sku_id, 1))
-        return self.build_cart(chosen, categories=categories).cart
+            # Keyed by what Swiggy returned, not by what was asked for: the
+            # classification belongs to the product that ended up in the cart.
+            if requested.get(name):
+                resolved[match.name] = requested[name]
+            if match.name != name:
+                swaps.append((name, match.name))
+
+        report = self.build_cart(chosen, categories=resolved)
+        self._substituted = tuple(swaps)
+        return report.cart
 
     def _best_match(self, name: str) -> Offer | None:
         """Cheapest in-stock variation whose name contains the query.
@@ -316,6 +347,15 @@ class SwiggyAdapter:
         # engine never sees — a basket under the cap, charged over it.
         items.extend(_fee_lines(payload))
 
+        if not items:
+            raise SwiggyUnavailable("the cart is empty; there is nothing to authorise")
+
+        negative = [i.name for i in items if i.price_paise < 0 and i.category != FEES_CATEGORY]
+        if negative:
+            # A discount belongs on the bill, not on a line of goods. An item
+            # priced below zero exists only to pull a total under a cap.
+            raise SwiggyUnavailable(f"item priced below zero: {', '.join(negative)}")
+
         charged = sum(item.price_paise for item in items)
         if charged != total:
             raise SwiggyUnavailable(
@@ -334,6 +374,7 @@ class SwiggyAdapter:
         return CartReport(
             cart=cart,
             total_paise=total,
+            substituted=self._substituted,
             unserviceable=_names(payload.get("unserviceableItems")),
             removed_out_of_stock=_names(payload.get("removedOutOfStockItems")),
             reduced_quantity=_names(payload.get("reducedQuantityItems")),
@@ -370,10 +411,19 @@ def _category_for(name: str, assigned: dict[str, str]) -> str:
     Only the first is authoritative. The user curated the list; the lookup is a
     convenience for things they never named; and blank makes the engine ask,
     which is the right answer when nobody has actually said.
+
+    The match is **exact on the resolved product name**, not a substring. It
+    used to be a substring, which meant a list line "Milk" classified as
+    groceries also classified "Milk Chocolate Bar" — and since the adapter picks
+    the cheapest product matching a query, a merchant could name something to
+    inherit a category the user never granted it. `create_cart` keys this map by
+    what Swiggy actually returned, so there is nothing left to guess.
     """
-    for requested, category in assigned.items():
-        if requested.casefold() in name.casefold() and category:
-            return category
+    category = assigned.get(name, "")
+    # Only the adapter mints a fee line. A user-supplied `fees` would be a
+    # category every policy allows, granted to arbitrary goods.
+    if category and category != FEES_CATEGORY:
+        return category
     return categorise(name)
 
 

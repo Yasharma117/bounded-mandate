@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 from .agent import ADVERSARIAL_SYSTEM, BuyerAgent
 from .basket import ListKind, ShoppingList, seed_lists
-from .categories import with_fees
+from .categories import FEES, with_fees
 from .commerce import build as build_commerce
 from .commerce import is_live
 from .compiler import compile_mandate
@@ -665,10 +665,15 @@ def write_list(list_id: str, body: ListEdit) -> dict:
     unknown = [n for n in body.item_names if n not in MARKETPLACE["instamart"].catalog]
     if unknown:
         raise HTTPException(400, f"not stocked: {', '.join(unknown)}")
-    kept = {
-        name: (body.categories or {}).get(name) or shopping.category_of(name)
-        for name in body.item_names
-    }
+    supplied = body.categories or {}
+    # `fees` is allowed by every policy, so letting it be assigned to goods
+    # would hand out a category that clears the scope check on anything.
+    # Only the commerce adapter mints a fee line.
+    smuggled = [name for name, category in supplied.items() if category == FEES]
+    if smuggled:
+        raise HTTPException(400, f"`{FEES}` is not a category you can assign: {smuggled[0]}")
+
+    kept = {name: supplied.get(name) or shopping.category_of(name) for name in body.item_names}
     LISTS[list_id] = replace(
         shopping,
         item_names=tuple(body.item_names),
