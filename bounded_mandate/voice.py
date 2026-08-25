@@ -17,8 +17,11 @@ import httpx2 as httpx
 BASE_URL = os.environ.get("ELEVENLABS_BASE_URL", "https://api.elevenlabs.io/v1")
 STT_MODEL = os.environ.get("ELEVENLABS_STT_MODEL", "scribe_v2")
 TTS_MODEL = os.environ.get("ELEVENLABS_TTS_MODEL", "eleven_flash_v2_5")
-# Rachel, a stock public voice. Swap for a cloned one by setting the env var.
-VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+# Sarah — a *premade* voice, which matters: free accounts cannot use library
+# voices over the API and get a 402 that looks like a billing fault rather than
+# a voice-id one. Premade voices work on every tier. `GET /v1/voices` lists what
+# an account can actually reach; swap with the env var.
+VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
 TIMEOUT = 30.0
 
 # 4 MB of m4a is several minutes of speech. Past that something is wrong, and
