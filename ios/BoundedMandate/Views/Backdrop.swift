@@ -42,11 +42,22 @@ struct Backdrop: View {
     }
 
     /// Static points, static colours, rasterised once.
+    ///
+    /// The scale is not decoration. Rotating a 402x874 rect by θ pulls its
+    /// corners inside the screen, and the page shows through as white unless
+    /// the layer is oversized enough to cover:
+    ///
+    ///     scale >= max((W·cosθ + H·sinθ)/W, (H·cosθ + W·sinθ)/H)
+    ///
+    /// which is 1.186 at 5° and 1.075 at 2°. The first version rotated 5° at a
+    /// scale of 1.04, so white corners swung into view on every cycle. Two
+    /// degrees reads as drift without needing a quarter of the layer wasted
+    /// off-screen, and 1.14 leaves room to spare at both ends of the cycle.
     private func mesh(_ colors: [Color]) -> some View {
         MeshGradient(width: 3, height: 3, points: Self.points, colors: colors)
             .drawingGroup()
-            .scaleEffect(reduceMotion ? 1 : (drift ? 1.14 : 1.04))
-            .rotationEffect(.degrees(reduceMotion ? 0 : (drift ? 5 : -5)))
+            .scaleEffect(reduceMotion ? 1 : (drift ? 1.22 : 1.14))
+            .rotationEffect(.degrees(reduceMotion ? 0 : (drift ? 2 : -2)))
     }
 
     /// The reactive part: a soft highlight that swells with the voice. One

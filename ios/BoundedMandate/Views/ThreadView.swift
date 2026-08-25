@@ -133,6 +133,7 @@ struct ThreadView: View {
     /// before it.
     @State private var voiceness: Double = 0
 
+
     var body: some View {
         NavigationStack {
             ScrollViewReader { scroller in
@@ -156,7 +157,10 @@ struct ThreadView: View {
                     }
                     .padding(16)
                 }
-                .scrollEdgeEffectStyle(.soft, for: .top)
+                // Hard, not soft. A soft edge lets the thread ghost up through
+                // the title, and a money figure half-visible behind a nav bar
+                // is worse than one that simply is not there yet.
+                .scrollEdgeEffectStyle(.hard, for: .top)
                 .onChange(of: thread.messages.count) {
                     // Slightly behind the entrance, so the new thing is on
                     // screen by the time the scroll catches up to it.
@@ -187,7 +191,13 @@ struct ThreadView: View {
                     await thread.send(opening)
                 }
             }
-            .safeAreaBar(edge: .bottom) { composer }
+            // `safeAreaBar` paints its own glass, which sat as a translucent
+            // slab behind the orb. The composer already carries its own glass,
+            // so it takes the plain inset and measures itself instead.
+            // A reserved inset, not an overlay: an overlay floats over the
+            // thread, and the orb ended up sitting on top of a card the reader
+            // was in the middle of.
+            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         }
     }
 
@@ -229,6 +239,16 @@ struct ThreadView: View {
             }
         }
         .padding(.bottom, 8)
+        // Full width, or the scrim takes the width of whichever child happens
+        // to be widest and leaves rectangular seams across the thread.
+        .frame(maxWidth: .infinity)
+        // Content scrolling past has to *go* somewhere, and glass refracts
+        // whatever is behind it — which here was the reader's own cart, showing
+        // through the control they were about to press. The scrim fades the
+        // thread into the page colour instead, over a long enough distance that
+        // there is no edge to see, and follows the backdrop into voice mode so
+        // the two never disagree about what colour the page is.
+        .background(alignment: .bottom) { scrim }
         .animation(
             Motion.respectful(voice == nil ? Motion.unmorph : Motion.morph, reduced: reduceMotion),
             value: voice == nil
@@ -350,6 +370,31 @@ struct ThreadView: View {
             }
         }
         .arrives(reduceMotion, delay: thread.delays[message.id] ?? 0)
+    }
+
+    /// The page colour under the composer, wherever the backdrop currently is.
+    private var scrimColour: Color {
+        theme.bgSubtle.mix(with: theme.primary, by: voiceness * 0.62)
+    }
+
+    private var scrim: some View {
+        LinearGradient(
+            stops: [
+                .init(color: scrimColour.opacity(0), location: 0),
+                .init(color: scrimColour.opacity(0.72), location: 0.38),
+                .init(color: scrimColour, location: 0.72),
+                .init(color: scrimColour, location: 1),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .frame(height: 320)
+        .frame(maxWidth: .infinity)
+        // Overshoot the bottom rather than trusting the safe area to be
+        // ignored from inside a background: it stopped at the home-indicator
+        // boundary and left a visible band of untouched backdrop below it.
+        .padding(.bottom, -140)
+        .allowsHitTesting(false)
     }
 
     private var backdrop: some View {
