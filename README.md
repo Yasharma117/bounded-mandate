@@ -646,37 +646,76 @@ That is the verification path proven against a real Razorpay signature rather
 than a synthetic one.
 
 **What actually blocked this for several attempts:** the first key pair was a
-rotated one. Razorpay's server API kept accepting it — `POST /v1/orders`
-returned real orders — while `POST /v1/standard_checkout/payments/create/ajax`
-answered `401 "The api key provided by you has expired"`. The split is that the
-server API authenticates with `key_id` **and secret**, whereas checkout
-authenticates with `key_id` alone, and only the latter is checked against key
-rotation. A fresh key pair fixed it immediately.
+rotated one, and checkout authenticates with `key_id` alone while the server API
+uses `key_id` **and secret** — so the server API kept returning real orders from
+a key checkout had already stopped accepting. A fresh pair fixed the checkout
+leg immediately.
 
 `activated: false` on the account was **not** the cause — this payment
 succeeded with the account still in that state.
 
+Two claims that used to sit here have since been **disproven by retesting on a
+freshly issued key pair**, and are corrected below rather than quietly deleted:
+
+- *"A fresh key pair makes server-side payment creation work."* It does not.
+  `POST /v1/payments/create/ajax` answers `401 Authentication failed` to server
+  credentials no matter how new they are, because that route does not accept
+  them; and it answers a plain nginx `403` to a server presenting `key_id`,
+  because it is browser-only. The ₹1,850 capture was made from a browser.
+- *"Regenerating keys is one of the three things needed to unblock."* Rotation
+  changes nothing about capability. Capability is a property of the account, not
+  of the key — verified by comparing `/v1/preferences` across an old and a new
+  pair on the same account and getting an identical answer.
+
 ### What the account does not yet permit
 
-`GET /v1/preferences` is the authority here, and it reports:
+`GET /v1/preferences?key_id=…` is the authority here — note it authenticates
+with `key_id` alone; sending server credentials gets a `401`. On a freshly
+issued key pair it reports:
 
 ```
-card: True   upi: False   emandate: None   nach: True
-recurring: None          debit_card_recurring: None
+activated: False
+card: True    upi: False    nach: True    cod: False
+emandate, recurring, debit_card_recurring:  absent from `methods` entirely
+features matching /recur|s2s/:              none
 ```
 
-**No method on this account supports recurring**, so Checkout answers any
-mandate order with *"No appropriate payment method found"* regardless of rail —
-switching `RAZORPAY_MANDATE_METHOD` to `card` does not help. Separately, a
-one-time card payment fails at submission with *"The api key provided by you
-has expired"*, even though the same key creates orders through the server API
-seconds later.
+**Every route that would move a customer's money without a human present is
+closed, and each for its own reason:**
 
-Order-creation success is **not** evidence that a method is available. The
-`/v1/preferences` response is.
+| Route | Gate |
+|---|---|
+| mandate debit (`payment.createRecurring`) | needs a token from a registered UPI Autopay mandate; `upi: false` and no `recurring`/`emandate` |
+| documented server-to-server card charge | needs S2S enablement; no such feature on the account |
+| checkout's own `payments/create/ajax` | browser-only — `403` from nginx to a server, `401` to server credentials |
 
-Unblocking needs three things on the Razorpay account, none of them code:
-account activation, regenerated keys, and recurring / UPI Autopay enabled.
+Order-creation success is **not** evidence that a method is available, and
+neither is a fresh key. The `/v1/preferences` response is.
+
+Independently confirmed against the **Razorpay MCP server**, which exposes 35+
+tools over the same account: its payments category is `capture_payment`,
+`fetch_payment`, `fetch_payment_card_details`, `fetch_all_payments`,
+`update_payment` — **no create** — and there is no tool for recurring,
+subscriptions, mandates or tokens anywhere in it. An MCP wrapper cannot grant a
+capability the account lacks.
+
+Unblocking needs exactly one thing, and it is not code: **recurring / UPI Autopay
+enabled on the account** (which in turn wants activation completed). `charge()`
+is already written and tested against that day.
+
+**The fallback, if that is refused.** Razorpay orders support manual capture
+(`payment_capture: 0`): the user authorises once in checkout, the payment sits
+`authorized`, and the engine **captures it server-side after its verdict, with
+nobody present**. That is real money moving unattended, on an account that
+cannot do recurring, and it mirrors the two-leg shape this README already argues
+for. It is not a mandate — a card authorisation is a fixed amount with a short
+expiry, so it cannot be reused for a different basket — and it is untested here,
+so it is written down as a plan rather than a result.
+
+**Payment Links are deliberately not the answer.** They work on this account
+(verified — `plink_TUWAJxRD3uQfpl` created server-side, nobody present), but a
+link the agent sends you to approve is precisely the confirm dialog this product
+exists to remove. It would make the demo visible and the thesis weaker.
 
 ### Running it
 
