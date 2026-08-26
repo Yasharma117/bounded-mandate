@@ -1,1 +1,16 @@
-{"offers":[{"merchant":"instamart","name":"Smartwatch","price_paise":1500000,"category":"electronics","url":"/m/instamart/p/Smartwatch","merchant_allowed":true,"category_allowed":false}]}
+{
+ "offers": [
+  {
+   "merchant": "instamart",
+   "name": "Smartwatch",
+   "price_paise": 1500000,
+   "category": "electronics",
+   "url": "/m/instamart/p/Smartwatch",
+   "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/ciw/2026/2/20/3aa7bf11-8061-4c7a-aa99-663dce4e03f5_1UF8AI33JI_MN_20022026.png",
+   "merchant_allowed": true,
+   "category_allowed": false
+  }
+ ],
+ "live": false,
+ "comparable": true
+}

@@ -99,7 +99,9 @@ struct ProductThumb: View {
     var side: CGFloat = 34
 
     var body: some View {
-        if let url, let parsed = URL(string: url) {
+        // Blank and absent are the same thing, normalised here so no model has
+        // to remember to do it.
+        if let url, !url.isEmpty, let parsed = URL(string: url) {
             AsyncImage(url: parsed) { phase in
                 switch phase {
                 case .success(let image):

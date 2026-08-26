@@ -38,7 +38,7 @@ from .commerce import is_live
 from .compiler import GrantRefused, compile_mandate, grant_for_cart
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import Ledger
-from .merchant import UnknownItem, UnknownMerchant
+from .merchant import MERCHANT_NAME, UnknownItem, UnknownMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
 from .swiggy import ADDRESS_ID as SWIGGY_ADDRESS_ID
 from .voice import SPEAKERS, TTS_PROVIDER, VoiceUnavailable, speak, transcribe
@@ -177,9 +177,9 @@ def _rendered(decision, *, claimed_total_paise: int, cart_items: int) -> dict:
             "price_paise": item.price_paise,
             "category": item.category,
             "url": f"/m/{cart.merchant}/p/{quote(item.name)}",
-            # Decoration, and empty on the mock — which has no photographs
-            # because it has no products. The card renders nothing rather than
-            # a placeholder when this is blank.
+            # Decoration. Blank for a fee line, and for anything the merchant
+            # has no picture of — the card renders nothing rather than a
+            # placeholder box, so a missing photo costs no layout.
             "image_url": item.image_url,
             # Why this line is a problem, if it is. Computed here because it is
             # the policy's judgement, not the client's.
@@ -660,6 +660,19 @@ def _annotate(offers: list[dict]) -> list[dict]:
     ]
 
 
+def _offer_parts(offer) -> tuple[str, object]:
+    """Both backends answer `search`; they answer it with different shapes.
+
+    The mock pairs a seller with a catalog item because it has three sellers.
+    Swiggy is one shop, so its offer *is* the product. Normalised here rather
+    than branching on `is_live()` — the two objects already agree on the four
+    attribute names that matter, and the seam is a shape difference, not a mode.
+    """
+    if hasattr(offer, "item"):
+        return offer.merchant, offer.item
+    return MERCHANT_NAME, offer
+
+
 def _offer_rows(query: str) -> list[dict]:
     """Every seller's price for a product, with the policy's answer attached.
 
@@ -668,21 +681,25 @@ def _offer_rows(query: str) -> list[dict]:
     reimplementing it — it only renders what it is told.
     """
     policy = POLICIES["mdt_demo"]
-    return [
-        {
-            "merchant": offer.merchant,
-            "name": offer.item.name,
-            "price_paise": offer.item.price_paise,
-            "category": offer.item.category,
-            "url": f"/m/{offer.merchant}/p/{quote(offer.item.name)}",
-            # Two separate answers, not one. A shop can be allowed while the
-            # thing it sells is not, and telling the user "not on your list"
-            # when the shop *is* on their list names the wrong reason.
-            "merchant_allowed": offer.merchant in policy.merchants,
-            "category_allowed": offer.item.category in policy.categories,
-        }
-        for offer in MARKETPLACE.search(query)
-    ]
+    rows = []
+    for offer in MARKETPLACE.search(query):
+        seller, item = _offer_parts(offer)
+        rows.append(
+            {
+                "merchant": seller,
+                "name": item.name,
+                "price_paise": item.price_paise,
+                "category": item.category,
+                "url": f"/m/{seller}/p/{quote(item.name)}",
+                "image_url": item.image_url,
+                # Two separate answers, not one. A shop can be allowed while the
+                # thing it sells is not, and telling the user "not on your list"
+                # when the shop *is* on their list names the wrong reason.
+                "merchant_allowed": seller in policy.merchants,
+                "category_allowed": item.category in policy.categories,
+            }
+        )
+    return rows
 
 
 @app.get("/api/catalog")
@@ -793,6 +810,7 @@ def _list_rows(shopping: ShoppingList) -> dict:
             "category": shopping.category_of(name)
             or (catalog[name].category if name in catalog else ""),
             "url": f"/m/{seller}/p/{quote(name)}",
+            "image_url": catalog[name].image_url if name in catalog else "",
         }
         for name in shopping.item_names
     ]
@@ -835,6 +853,23 @@ def _schedule_words(shopping: ShoppingList) -> str:
     return f"Every {shopping.every_days} days"
 
 
+def _unstocked(names: list[str]) -> list[str]:
+    """Names this shop does not sell.
+
+    Answerable on the mock, which holds its whole catalog in memory. On the live
+    path it is one `search_products` per line — a dozen round trips to validate
+    one list edit — so it is not asked, and the list accepts the name.
+
+    Nothing is lost by that. An unbuyable line is caught where it costs
+    something: `create_cart` reports what it could not resolve, the cart comes
+    back short, and the engine rules on the cart that exists rather than the one
+    that was asked for.
+    """
+    if is_live():
+        return []
+    return [name for name in names if name not in MARKETPLACE[MERCHANT_NAME].catalog]
+
+
 class NewList(BaseModel):
     name: str = Field(min_length=1)
     item_names: list[str] = Field(default_factory=list)
@@ -866,7 +901,7 @@ def create_list(body: NewList) -> dict:
         kind = ListKind(body.kind)
     except ValueError as exc:
         raise HTTPException(400, "kind must be `standing` or `once`") from exc
-    unknown = [n for n in body.item_names if n not in MARKETPLACE["instamart"].catalog]
+    unknown = _unstocked(body.item_names)
     if unknown:
         raise HTTPException(400, f"not stocked: {', '.join(unknown)}")
 
@@ -945,7 +980,7 @@ def write_list(list_id: str, body: ListEdit) -> dict:
     shopping = LISTS.get(list_id)
     if shopping is None:
         raise HTTPException(404, "no such list")
-    unknown = [n for n in body.item_names if n not in MARKETPLACE["instamart"].catalog]
+    unknown = _unstocked(body.item_names)
     if unknown:
         raise HTTPException(400, f"not stocked: {', '.join(unknown)}")
     supplied = body.categories or {}
@@ -973,10 +1008,15 @@ def product_page(merchant: str, name: str) -> str:
     instruction is sitting in a product title that the agent reads and the
     shopper never looks at twice.
     """
-    try:
-        item = MARKETPLACE[merchant].catalog[name]
-    except (UnknownMerchant, UnknownItem, KeyError) as exc:
-        raise HTTPException(404, "not stocked") from exc
+    item = _product(merchant, name)
+    if item is None:
+        raise HTTPException(404, "not stocked")
+    photo = (
+        f"<img src='{escape(item.image_url)}' alt='' width='160' height='160' "
+        f"style='object-fit:contain;margin-bottom:1rem'>"
+        if item.image_url
+        else ""
+    )
     return (
         f"<!doctype html><meta charset=utf-8>"
         f"<title>{escape(item.name)} · {escape(merchant)}</title>"
@@ -984,10 +1024,27 @@ def product_page(merchant: str, name: str) -> str:
         f"margin:3rem auto;padding:0 1rem'>"
         f"<p style='color:#8E96C8;text-transform:uppercase;letter-spacing:.08em;"
         f"font-size:.75rem'>{escape(merchant)}</p>"
+        f"{photo}"
         f"<h1 style='font-size:1.25rem'>{escape(item.name)}</h1>"
         f"<p style='font-size:1.5rem;font-weight:600'>₹{item.price_paise / 100:,.0f}</p>"
         f"<p style='color:#666'>{escape(item.category or 'uncategorised')}</p>"
     )
+
+
+def _product(merchant: str, name: str):
+    """One product, from whichever backend is running.
+
+    The mock holds a catalog and can be asked directly. Swiggy has no
+    by-name lookup, so this costs one `search_products` — acceptable for a page
+    a person opened by tapping a link, and not on any path the agent walks.
+    """
+    if is_live():
+        matches = [item for _, item in map(_offer_parts, MARKETPLACE.search(name))]
+        return next((m for m in matches if m.name == name), None) or next(iter(matches), None)
+    try:
+        return MARKETPLACE[merchant].catalog[name]
+    except (UnknownMerchant, UnknownItem, KeyError):
+        return None
 
 
 # --- the scheduler ----------------------------------------------------------

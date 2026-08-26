@@ -6,6 +6,8 @@ struct ListItem: Codable, Hashable, Sendable, Identifiable {
     let pricePaise: Int?
     let category: String
     let url: String
+    /// The merchant's own photograph. Decoration — see `ProductThumb`.
+    let imageURL: String?
 
     var id: String { name }
     /// The shop does not stock it. Shown, not silently dropped — a list is a
@@ -15,7 +17,27 @@ struct ListItem: Codable, Hashable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case name
         case pricePaise = "price_paise"
+        case imageURL = "image_url"
         case category, url
+    }
+
+    init(from decoder: any Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        name = try box.decode(String.self, forKey: .name)
+        pricePaise = try box.decodeIfPresent(Int.self, forKey: .pricePaise)
+        category = try box.decode(String.self, forKey: .category)
+        url = try box.decode(String.self, forKey: .url)
+        imageURL = try box.decodeIfPresent(String.self, forKey: .imageURL)
+    }
+
+    init(
+        name: String, pricePaise: Int?, category: String, url: String, imageURL: String? = nil
+    ) {
+        self.name = name
+        self.pricePaise = pricePaise
+        self.category = category
+        self.url = url
+        self.imageURL = imageURL
     }
 }
 
@@ -119,6 +141,8 @@ struct Offer: Codable, Hashable, Sendable, Identifiable {
     let pricePaise: Int
     let category: String
     let url: String
+    /// The merchant's own photograph. Decoration — see `ProductThumb`.
+    let imageURL: String?
     /// Computed server-side. Whether a shop is allowed is the engine's
     /// judgement, and the app should not be reimplementing it.
     ///
@@ -144,6 +168,7 @@ struct Offer: Codable, Hashable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case merchant, name, category, url
         case pricePaise = "price_paise"
+        case imageURL = "image_url"
         case merchantAllowed = "merchant_allowed"
         case categoryAllowed = "category_allowed"
     }

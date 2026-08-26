@@ -172,6 +172,7 @@ struct ItemRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            ProductThumb(url: item.imageURL, side: 32)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name)
                     .font(.system(size: 15))

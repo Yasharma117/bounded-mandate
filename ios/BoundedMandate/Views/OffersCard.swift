@@ -27,17 +27,24 @@ struct OffersCard: View {
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Eyebrow(text: plural(offers.count, "shop"), color: theme.primary)
-                    Text(product)
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(theme.textNormal)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let premiumPaise {
-                        Text("Staying on your list costs \(rupees(premiumPaise)) more")
-                            .font(.system(size: 13))
-                            .foregroundStyle(theme.notice)
+                HStack(alignment: .top, spacing: 12) {
+                    // Once, in the header. Every row below is the *same*
+                    // product at a different shop, so a thumbnail per row would
+                    // be the same photograph printed four times.
+                    ProductThumb(url: sorted.first?.imageURL, side: 46)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Eyebrow(text: plural(offers.count, "shop"), color: theme.primary)
+                        Text(product)
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(theme.textNormal)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let premiumPaise {
+                            Text("Staying on your list costs \(rupees(premiumPaise)) more")
+                                .font(.system(size: 13))
+                                .foregroundStyle(theme.notice)
+                        }
                     }
+                    Spacer(minLength: 0)
                 }
                 .padding(18)
 

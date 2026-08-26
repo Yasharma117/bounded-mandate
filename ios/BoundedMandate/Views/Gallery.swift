@@ -151,9 +151,16 @@ enum Fixtures {
         Offer(
             merchant: merchant, name: name, pricePaise: paise, category: category,
             url: "/m/\(merchant)/p/\(name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name)",
+            imageURL: attaPhoto,
             merchantAllowed: shopOK, categoryAllowed: categoryOK
         )
     }
+
+    /// A real captured URL, so the gallery renders the thumbnail rather than
+    /// the empty layout — the gallery exists to iterate on what ships.
+    static let attaPhoto =
+        "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit"
+        + "/NI_CATALOG/IMAGES/CIW/2026/3/9/805a02b1-e08b-4d4b-aa8f-ab05cabb1e37_1780_1.png"
 
     static let attaOffers = [
         offer("blinkit", 25_900, "Aashirvaad atta 5kg", shopOK: false),

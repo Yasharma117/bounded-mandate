@@ -465,6 +465,21 @@ struct CardCopyTests {
         #expect(decision.orderedItems.prefix(2).allSatisfy { $0.flagged })
     }
 
+    @Test func everyLineTheUserReadsCarriesAPhotograph() throws {
+        struct Offers: Decodable { let offers: [Offer] }
+
+        let list = try decode(ShoppingList.self, "list")
+        #expect(list.items.allSatisfy { $0.imageURL?.hasPrefix("https://") == true })
+
+        let offers = try decode(Offers.self, "offers").offers
+        #expect(offers.allSatisfy { $0.imageURL?.hasPrefix("https://") == true })
+
+        // One picture per product, not per seller — the offers card draws it
+        // once in the header, and three shops selling the same atta must not
+        // disagree about what atta looks like.
+        #expect(Set(offers.map(\.imageURL)).count == 1)
+    }
+
     // MARK: - where things get delivered
 
     @Test func theAddressBookSaysWhereOrdersGo() throws {

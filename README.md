@@ -786,10 +786,16 @@ icons) is free only with attribution for non-commercial use, has no dal, ghee,
 atta or Indian spices, and would have covered maybe two-thirds of even the mock
 catalog.
 
-**The mock has no photographs, because it has no products.** `ProductThumb`
-draws nothing without a URL rather than a placeholder box, so the offline path
-renders exactly as it did before. (This does mean a mock-backed walkthrough has
-no thumbnails; imagery on camera needs `BM_COMMERCE=swiggy`.)
+**The mock has photographs too**, and they are real ones. Its products *are*
+real products — the mock invents their prices, not their existence — so each of
+the seventeen catalog lines carries the merchant's own photograph, captured once
+from `search_products` and committed to `catalog_images.json`. Static, so the
+mock stays offline: no session, no token, no network. One picture per product
+rather than per seller, because the other shops sell the same thing at their own
+price.
+
+`ProductThumb` still draws nothing without a URL rather than a placeholder box,
+so a fee line, an unmatched product or a rotted URL costs no layout.
 
 ### It is decoration, and the tests keep it that way
 
@@ -809,6 +815,31 @@ start reading it. Three properties are pinned:
 A line is flagged by its text and its badge. The thumbnail sits beside that and
 changes none of it, so a merchant serving a misleading photo — or none at all —
 cannot make an off-scope item read as ordinary.
+
+## Both backends answer the same questions
+
+Four routes used to return 500 against `BM_COMMERCE=swiggy` — `/api/catalog`,
+both list-edit routes, and the product page. The mock had been hiding them,
+which is the strongest argument *for* running against live data and, oddly, the
+strongest argument for keeping the mock: the engine's own tests never went near
+those routes and stayed green throughout.
+
+The causes were mundane and worth naming, because they are what "provider
+independence" costs when nobody checks:
+
+- **`search` answers with two different shapes.** The mock pairs a seller with a
+  catalog item because it has three sellers; Swiggy is one shop, so its offer
+  *is* the product. `_offer_parts` normalises the two rather than branching on
+  `is_live()` — they already agree on the four attribute names that matter.
+- **A live merchant has no catalog to validate a list against.** One
+  `search_products` per line is a dozen round trips to check one edit, so
+  `_unstocked` does not ask on the live path. Nothing is lost: an unbuyable line
+  is caught where it costs something — `create_cart` reports what it could not
+  resolve, the cart comes back short, and the engine rules on the cart that
+  exists rather than the one that was requested.
+- **The product page needed a by-name lookup Swiggy does not have.** It now
+  costs one search, which is acceptable for a page a person opened by tapping a
+  link and is not on any path the agent walks.
 
 ## Audit ledger
 
@@ -880,8 +911,8 @@ purely Razorpay account configuration.
 a second mandate from the basket the engine fetched, `GET /pay` is a real
 Standard Checkout, and paying revokes the grant. Delivery is a user-owned
 choice over the account's own address book, matched by id rather than prose,
-and cart lines carry the merchant's own product photography. 303 Python tests
-and 36 Swift tests, no network.
+and every line the user reads carries the merchant's own product photography.
+308 Python tests and 37 Swift tests, no network.
 
 Next: an app icon and the recorded walkthrough.
 

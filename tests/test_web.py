@@ -622,3 +622,64 @@ def test_the_agent_holds_no_tool_that_moves_the_address(client):
 
     args = inspect.signature(BuyerAgent._create_cart).parameters
     assert set(args) == {"self", "item_names", "merchant"}
+
+
+# --- product photographs ------------------------------------------------------
+
+
+def test_every_line_the_user_reads_carries_a_photograph(client):
+    """List, offers and the decision cart. The mock's products are real products
+    — it invents their prices, not their existence — so the merchant's own
+    photography is the accurate picture rather than an approximation."""
+    listed = client.get("/api/list/usual").json()["items"]
+    assert listed and all(i["image_url"].startswith("https://") for i in listed)
+
+    offers = client.get("/api/catalog?q=atta").json()["offers"]
+    assert offers and all(o["image_url"].startswith("https://") for o in offers)
+
+    cart = propose(client, USUAL, 185_000)["items"]
+    assert cart and all(i["image_url"].startswith("https://") for i in cart)
+
+
+def test_the_product_page_shows_the_product(client):
+    page = client.get("/m/instamart/p/Brown%20bread")
+    assert page.status_code == 200
+    assert "<img src='https://" in page.text
+
+
+def test_the_same_product_wears_the_same_photograph_at_every_shop(client):
+    """One picture per product, not per seller. The other shops sell the same
+    thing at their own price."""
+    rows = client.get("/api/catalog?q=atta").json()["offers"]
+    by_name = {}
+    for row in rows:
+        by_name.setdefault(row["name"], set()).add(row["image_url"])
+    assert all(len(urls) == 1 for urls in by_name.values())
+
+
+# --- both backends answer the same questions ----------------------------------
+
+
+def test_offer_rows_normalise_either_backend_shape(client):
+    """The mock pairs a seller with an item because it has three sellers; Swiggy
+    is one shop, so its offer *is* the product. `_offer_rows` reads both."""
+    from types import SimpleNamespace
+
+    swiggy_shaped = SimpleNamespace(
+        name="Amul Taaza 200 ml", price_paise=1_700, category="groceries", image_url="https://x/y"
+    )
+    seller, item = web._offer_parts(swiggy_shaped)
+    assert (seller, item.name) == ("instamart", "Amul Taaza 200 ml")
+
+    mock_shaped = SimpleNamespace(merchant="blinkit", item=swiggy_shaped)
+    assert web._offer_parts(mock_shaped) == ("blinkit", swiggy_shaped)
+
+
+def test_a_list_edit_is_not_validated_against_a_live_catalog(client, monkeypatch):
+    """One `search_products` per line is a dozen round trips to validate one
+    edit. An unbuyable line is caught where it costs something instead — the
+    cart comes back short and the engine rules on the cart that exists."""
+    assert web._unstocked(["Ferrari"]) == ["Ferrari"]
+
+    monkeypatch.setattr(web, "is_live", lambda: True)
+    assert web._unstocked(["Ferrari"]) == []
