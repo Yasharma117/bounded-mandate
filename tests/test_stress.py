@@ -104,6 +104,7 @@ class TestCategoryCannotBeSmuggled:
                     "variations": [
                         {
                             "skuId": "S9",
+                            "spinId": "SPIN-S9",
                             "quantityDescription": "",
                             "price": {"offerPrice": 499},
                             "isInStockAndAvailable": True,

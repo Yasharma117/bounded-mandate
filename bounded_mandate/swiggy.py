@@ -48,6 +48,13 @@ from .merchant import UnknownItem
 
 MERCHANT_NAME = "instamart"
 
+#: Swiggy rounds `toPay` to the rupee while the bill lines carry paise, so a
+#: real cart is a few paise short of its own total. That gap is reconciled with
+#: a residual line rather than a tolerance, because a tolerance in a money check
+#: is a hole you cannot see the size of. Anything larger than this is not
+#: rounding and the cart is refused.
+MAX_ROUNDING_PAISE = 100
+
 #: Bill lines that are the goods themselves rather than a charge on top. Swiggy
 #: itemises both in the same array.
 _ITEM_TOTAL_LABELS = frozenset({"item total", "items total", "mrp total", "subtotal"})
@@ -86,6 +93,13 @@ class SwiggyUnavailable(RuntimeError):
 
 
 def to_paise(value: object) -> int:
+    """See `_to_paise`; `FREE` is a real bill value meaning nothing to pay."""
+    if isinstance(value, str) and value.strip().casefold() in {"free", "-", ""}:
+        return 0
+    return _to_paise(value)
+
+
+def _to_paise(value: object) -> int:
     """A Swiggy money field as integer paise.
 
     Accepts the number-or-string inconsistency between the two endpoints, and
@@ -117,9 +131,15 @@ def to_paise(value: object) -> int:
 
 @dataclass(frozen=True)
 class Offer:
-    """One buyable variation. `sku_id` is what `update_cart` takes."""
+    """One buyable variation.
+
+    `update_cart` requires **both** ids, not just the sku. Sending only the sku
+    is accepted and silently adds nothing, which is a worse failure than a
+    rejection — the cart comes back empty and every later step blames itself.
+    """
 
     sku_id: str
+    spin_id: str
     name: str
     price_paise: int
     category: str
@@ -219,15 +239,17 @@ class SwiggyAdapter:
         for product in payload.get("products") or []:
             base = product.get("displayName") or product.get("brand") or ""
             for variation in product.get("variations") or []:
-                sku = variation.get("skuId") or variation.get("spinId")
+                sku = variation.get("skuId")
+                spin = variation.get("spinId")
                 price = (variation.get("price") or {}).get("offerPrice")
-                if not sku or price is None:
+                if not sku or not spin or price is None:
                     continue
                 pack = variation.get("quantityDescription") or ""
                 name = f"{base} {pack}".strip()
                 offers.append(
                     Offer(
                         sku_id=str(sku),
+                        spin_id=str(spin),
                         name=name,
                         price_paise=to_paise(price),
                         # Swiggy carries no category on either endpoint; this is
@@ -259,14 +281,14 @@ class SwiggyAdapter:
         adapter does not have.
         """
         requested = categories or {}
-        chosen: list[tuple[str, int]] = []
+        chosen: list[tuple[Offer, int]] = []
         resolved: dict[str, str] = {}
         swaps: list[tuple[str, str]] = []
         for name in item_names:
             match = self._best_match(name)
             if match is None:
                 raise UnknownItem(name)
-            chosen.append((match.sku_id, 1))
+            chosen.append((match, 1))
             # Keyed by what Swiggy returned, not by what was asked for: the
             # classification belongs to the product that ended up in the cart.
             if requested.get(name):
@@ -293,7 +315,7 @@ class SwiggyAdapter:
         return min(exact or offers, key=lambda o: o.price_paise)
 
     def build_cart(
-        self, items: list[tuple[str, int]], *, categories: dict | None = None
+        self, items: list[tuple[Offer, int]], *, categories: dict | None = None
     ) -> CartReport:
         """Replace the session cart with exactly these `(sku_id, quantity)`.
 
@@ -303,7 +325,10 @@ class SwiggyAdapter:
         self._invoke(
             "update_cart",
             selectedAddressId=self.address_id(),
-            items=[{"skuId": sku, "quantity": qty} for sku, qty in items],
+            items=[
+                {"spinId": offer.spin_id, "skuId": offer.sku_id, "quantity": qty}
+                for offer, qty in items
+            ],
         )
         self._assigned = dict(categories or {})
         return self.read_cart()
@@ -325,7 +350,17 @@ class SwiggyAdapter:
         assigned = self._assigned if categories is None else categories
         items: list[CartItem] = []
         for line in payload.get("items") or []:
-            name = line.get("displayName") or line.get("name") or ""
+            # The cart calls it `itemName`; search calls the same thing
+            # `displayName`. Both are checked because neither endpoint is
+            # documented to carry the other's spelling.
+            name = " ".join(
+                part
+                for part in (
+                    line.get("itemName") or line.get("displayName") or line.get("name") or "",
+                    line.get("itemVariant") or "",
+                )
+                if part
+            ).strip()
             price = line.get("discountedFinalPrice")
             if price is None:
                 price = line.get("mrp")
@@ -357,11 +392,18 @@ class SwiggyAdapter:
             raise SwiggyUnavailable(f"item priced below zero: {', '.join(negative)}")
 
         charged = sum(item.price_paise for item in items)
-        if charged != total:
+        residual = total - charged
+        if abs(residual) > MAX_ROUNDING_PAISE:
             raise SwiggyUnavailable(
                 f"this cart does not add up: lines total ₹{charged / 100:,.2f}, "
                 f"Swiggy will charge ₹{total / 100:,.2f}"
             )
+        if residual:
+            # `toPay` is the authority — it is what leaves the account — so the
+            # cart is made to equal it rather than the other way round. Keeping
+            # it as a visible line means the cap sees the real figure and the
+            # card can show where the odd paise went.
+            items.append(CartItem(name="Rounding", price_paise=residual, category=FEES_CATEGORY))
         address = (payload.get("selectedAddressDetails") or {}).get("address") or payload.get(
             "selectedAddress"
         )
@@ -442,20 +484,32 @@ def _fee_lines(payload: dict) -> list[CartItem]:
         label = str(entry.get("label") or "").strip()
         if not label or label.casefold() in _ITEM_TOTAL_LABELS:
             continue
-        charge = to_paise(entry.get("value"))
+        charge = to_paise(_amount(entry.get("value")))
         if charge == 0:
             continue  # a free delivery is not a line worth showing
         lines.append(CartItem(name=label, price_paise=charge, category=FEES_CATEGORY))
     return lines
 
 
+def _amount(value: object) -> object:
+    """Swiggy wraps bill figures as `{"label": ..., "value": ...}`.
+
+    Not documented on the reference page and not what the synthetic fixture
+    guessed — found by reading a real cart, which is the entire reason for
+    capturing one before trusting a parser.
+    """
+    if isinstance(value, dict):
+        return value.get("value")
+    return value
+
+
 def _total_from(payload: dict) -> object:
     """`billBreakdown.toPay` when present, else the cart total."""
     breakdown = payload.get("billBreakdown") or {}
     if breakdown.get("toPay") is not None:
-        return breakdown["toPay"]
+        return _amount(breakdown["toPay"])
     if payload.get("cartTotalAmount") is not None:
-        return payload["cartTotalAmount"]
+        return _amount(payload["cartTotalAmount"])
     raise SwiggyUnavailable("cart carries no total")
 
 

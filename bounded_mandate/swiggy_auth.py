@@ -253,11 +253,13 @@ def show_addresses() -> int:
         print("  This account has no delivery address. Add one in the Swiggy app first.")
         return 1
     print("\n  Addresses on this account:\n")
+    # Field names taken from a real payload, not guessed: `addressLine`,
+    # `addressTag`, `addressCategory`.
     for row in rows:
-        identifier = row.get("id") or row.get("addressId")
-        label = row.get("annotation") or row.get("name") or ""
-        where = row.get("address") or row.get("displayAddress") or ""
-        print(f"    {identifier}  {label:<10} {where}")
+        identifier = row.get("id") or row.get("addressId") or ""
+        tag = row.get("addressTag") or row.get("addressCategory") or ""
+        where = row.get("addressLine") or ""
+        print(f"    {identifier:<22} {tag:<8} {where[:64]}")
     print("\n  Serviceability varies by address, so pin one rather than")
     print("  discovering it on camera:\n")
     print(f"    SWIGGY_ADDRESS_ID={rows[0].get('id') or rows[0].get('addressId')}\n")

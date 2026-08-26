@@ -97,9 +97,16 @@ class TestMoney:
             to_paise("10.005")
 
     def test_nonsense_is_refused(self):
-        for bad in ("", "free", None, True, {}):
+        for bad in ("gratis", "nine", None, True, {}):
             with pytest.raises(SwiggyUnavailable):
                 to_paise(bad)
+
+    def test_free_is_a_real_bill_value_meaning_zero(self):
+        """Observed on a live cart: "Delivery Partner Fee" reads `FREE`, not
+        `0`. Refusing it would refuse every cart with free delivery."""
+        assert to_paise("FREE") == 0
+        assert to_paise("free") == 0
+        assert to_paise("") == 0
 
 
 # --- the content-addressed id ----------------------------------------------
@@ -485,6 +492,7 @@ class TestCategoryFromTheList:
                 "variations": [
                     {
                         "skuId": "S1",
+                        "spinId": "SPIN-S1",
                         "quantityDescription": "",
                         "price": {"offerPrice": 54},
                         "isInStockAndAvailable": True,
@@ -549,3 +557,86 @@ class TestMoneyFormatIsConfirmed:
         assert to_paise("₹1500.15") == 150_015
         assert to_paise("1500.15") == 150_015
         assert to_paise(1500.15) == 150_015
+
+
+# --- the shapes a real cart actually has ------------------------------------
+
+
+class TestRealPayloadShapes:
+    """Every case here was found by capturing a live cart, and every one of them
+    was wrong in the synthetic fixture the tests previously passed against."""
+
+    def cart(self):
+        return json.loads((PAYLOADS / "swiggy_cart.json").read_text())
+
+    def adapter(self, payload):
+        return SwiggyAdapter(lambda tool, **_: payload, address_id="addr_1")
+
+    def test_a_wrapped_total_is_read(self):
+        """`toPay` is `{"label": "To Pay", "value": "₹159"}`, not a scalar."""
+        assert self.adapter(self.cart()).read_cart().total_paise == 15_900
+
+    def test_lines_name_themselves_with_item_name(self):
+        """The cart says `itemName`; search says `displayName` for the same
+        thing. Reading only the latter left every line blank — and a blank name
+        classifies as nothing, so every real order would have CLARIFYed."""
+        names = [i.name for i in self.adapter(self.cart()).read_cart().cart.items]
+        assert all(names), f"a line has no name: {names}"
+        assert any("Amul" in n for n in names)
+
+    def test_free_delivery_does_not_break_the_bill(self):
+        """ "Delivery Partner Fee" reads `FREE` on a real cart."""
+        assert any(
+            entry["value"] == "FREE" for entry in self.cart()["billBreakdown"]["lineItems"]
+        ), "the captured cart no longer exercises this"
+        self.adapter(self.cart()).read_cart()  # must not raise
+
+    def test_the_rupee_rounding_is_carried_as_a_line(self):
+        """Swiggy rounds `toPay` to the rupee while the lines carry paise, so a
+        real cart is 40 paise short of its own total. Reconciled with a visible
+        line rather than a tolerance — a tolerance is a hole you cannot see the
+        size of."""
+        report = self.adapter(self.cart()).read_cart()
+        assert sum(i.price_paise for i in report.cart.items) == report.total_paise
+        rounding = [i for i in report.cart.items if i.name == "Rounding"]
+        assert rounding and abs(rounding[0].price_paise) < 100
+
+    def test_a_residual_too_large_to_be_rounding_is_refused(self):
+        payload = self.cart()
+        payload["billBreakdown"]["toPay"]["value"] = "₹900"
+        with pytest.raises(SwiggyUnavailable, match="does not add up"):
+            self.adapter(payload).read_cart()
+
+    def test_the_fees_on_a_real_cart_are_a_third_of_it(self):
+        """₹116 of groceries, ₹159 charged. This is what "fees escape the cap"
+        was worth in practice, and why it is the finding that mattered."""
+        report = self.adapter(self.cart()).read_cart()
+        goods = sum(i.price_paise for i in report.cart.items if i.category != "fees")
+        assert goods == 11_600
+        assert report.total_paise == 15_900
+        assert report.total_paise - goods > goods * 0.35
+
+
+class TestUpdateCartNeedsBothIds:
+    def test_an_offer_carries_both_identifiers(self):
+        """`update_cart` requires `spinId` *and* `skuId`. Sending only the sku
+        is accepted and silently adds nothing — the cart comes back empty and
+        every later step blames itself."""
+        search = json.loads((PAYLOADS / "swiggy_search.json").read_text())
+        offers = SwiggyAdapter(lambda *a, **k: search, address_id="a").search("milk")
+        assert offers
+        assert all(o.sku_id and o.spin_id for o in offers)
+
+    def test_a_variation_missing_either_id_is_skipped(self):
+        """Better to not offer it than to offer something that cannot be added."""
+        half = {
+            "products": [
+                {
+                    "displayName": "Half a product",
+                    "variations": [
+                        {"skuId": "S1", "price": {"offerPrice": 10}, "isInStockAndAvailable": True}
+                    ],
+                }
+            ]
+        }
+        assert SwiggyAdapter(lambda *a, **k: half, address_id="a").search("x") == []
