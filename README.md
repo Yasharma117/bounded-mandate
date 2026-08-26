@@ -686,6 +686,77 @@ uv run uvicorn bounded_mandate.web:app --reload
 Then open `http://127.0.0.1:8000`, edit the rule, press **Read it back** to see
 it compiled, and **Confirm and register** to open Razorpay's modal in test mode.
 
+## Where things get delivered
+
+The third thing the user owns, and the one with the sharpest edge on it. A
+mandate that bounds the cap, the shop and the scope is worth nothing if an agent
+can move the doorstep: ₹1,900 of perfectly ordinary groceries, entirely in
+policy, sent to a stranger.
+
+So the address book is read from the merchant, the **user** picks one, and that
+choice is pushed down to the commerce session and up into the policy in the same
+act. `GET /api/addresses` and `PUT /api/address` are the only routes that touch
+it, and no agent tool reaches either — `_create_cart(item_names, merchant)` has
+no third argument, which is why an injected prompt has nowhere to put an
+address. A test asserts that signature.
+
+Selecting *is* authorising, which is honest rather than lax: every row is
+already an address on the user's own account, so there is no third party to
+introduce. What the mandate stops is somebody else adding one — the agent, or a
+one-time grant, which is refused outright rather than shown on a card that
+displays a price and a shop.
+
+The new address **replaces** the authorised set rather than joining it. A
+mandate should authorise where you actually deliver; addresses that accumulate
+are authority nobody remembers granting.
+
+### Authority never travels as prose
+
+Found by running it. Swiggy returns the same address formatted two different
+ways depending which endpoint answered:
+
+```
+get_addresses  "<name>: <flat>, <area>, Sector 14 Road, Sector 14, Gurugram, …"
+get_cart       "Sector 14 Road, Sector 14, Gurugram, …"
+```
+
+Two strings, one place. A policy pinned to either is refused against the other,
+and it fails as `delivery.unknown_address` — **indistinguishable from an agent
+actually shipping somewhere it should not**. The `id` is byte-identical on both.
+
+So `Policy.delivery_addresses` holds ids, `Cart.delivery_address` carries the id,
+and the label and the street only ever reach the card. Matching authority
+against presentation is a bug waiting for a merchant to reformat a string.
+
+### A free thing is still a thing
+
+A live cart came back carrying a festive rakhi nobody added: ₹89 in `items[]`,
+absent from `Item Total`. The adapter refused the whole basket — correctly, but
+for the wrong reason. Two different residuals were being checked against one ₹1
+rounding tolerance, so a legitimate promotion looked exactly like a cart that
+does not add up.
+
+They are separate now. The goods reconcile against the bill's own item total via
+a visible `Discounts and free items` line; what remains is rounding, and that
+keeps its tight bound. Every line stays on the card at its listed price and the
+arithmetic is still exact.
+
+The freebie stays in the cart rather than being netted away, which is the part
+that matters: it is still categorised, classifies as nothing, and reaches the
+user as `category.unknown`. Something they did not ask for arrives as a question
+rather than in the box.
+
+```
+Floral Design Beaded Rudraksh Rakhi by Nanwan     ₹ 89.00   —
+Amul Taaza Milky Milk 500 ml                      ₹ 28.00   groceries
+Britannia Brown Bread 400 g                       ₹ 60.00   groceries
+Discounts and free items                          ₹−89.00   fees
+… fees …                                          ₹102.40   fees
+Rounding                                          ₹ −0.40   fees
+                                                  ₹190.00
+ESCALATE  category.unknown+frequency.exceeded
+```
+
 ## Audit ledger
 
 Append-only JSONL. Every entry carries the SHA-256 of the entry before it, so
@@ -754,8 +825,9 @@ purely Razorpay account configuration.
 
 **Phase 3 (the one-time purchase) — built.** `POST /api/mandate/one-time` mints
 a second mandate from the basket the engine fetched, `GET /pay` is a real
-Standard Checkout, and paying revokes the grant. 279 Python tests and 31 Swift
-tests, no network.
+Standard Checkout, and paying revokes the grant. Delivery is a user-owned
+choice over the account's own address book, matched by id rather than prose.
+289 Python tests and 33 Swift tests, no network.
 
 Next: an app icon and the recorded walkthrough.
 

@@ -45,6 +45,23 @@ enum Engine {
         URL(string: baseURL.absoluteString + path)
     }
 
+    /// Every address on the user's account, and which one orders go to.
+    static func readAddresses() async throws -> [DeliveryAddress] {
+        struct Wrapper: Decodable { let addresses: [DeliveryAddress] }
+        let wrapper: Wrapper = try await send("/api/addresses", method: "GET")
+        return wrapper.addresses
+    }
+
+    /// Deliver here from now on, and authorise it. A user action: there is no
+    /// agent tool that reaches this route.
+    static func chooseAddress(_ addressID: String) async throws -> [DeliveryAddress] {
+        struct Wrapper: Decodable { let addresses: [DeliveryAddress] }
+        let wrapper: Wrapper = try await send(
+            "/api/address", method: "PUT", body: ["address_id": addressID]
+        )
+        return wrapper.addresses
+    }
+
     /// Every list the user keeps, soonest-due first.
     static func readLists() async throws -> [ShoppingList] {
         struct Wrapper: Decodable { let lists: [ShoppingList] }

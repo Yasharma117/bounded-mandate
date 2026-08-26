@@ -1,4 +1,4 @@
-"""The user's shopping lists — what they want, and when.
+"""The user's own documents: shopping lists, and where things get delivered.
 
 This is the second thing the user owns, and it is not the policy. The policy
 bounds *how much*; a list defines *what*, and its schedule says *when to try*.
@@ -111,6 +111,50 @@ class ShoppingList:
 
     def ran(self, now: datetime | None = None) -> ShoppingList:
         return replace(self, last_run_at=now or datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class Address:
+    """Somewhere the user can have things delivered.
+
+    Three fields for what looks like one thing, because three different parties
+    read them:
+
+    - **`address_id` is what the engine matches on.** Opaque, merchant-issued,
+      stable.
+    - **`label` is what the user calls it.** "Office", "Mum's".
+    - **`line` is what the card shows.**
+
+    Matching authority against `line` would be matching against presentation,
+    and Swiggy is the proof. The same address reads
+
+        get_addresses  "<name>: <flat>, <area>, Sector 14 Road, Sector 14,
+                        Gurugram, Haryana 122007, India"
+        get_cart       "Sector 14 Road, Sector 14, Gurugram, Haryana 122007,
+                        India"
+
+    Two strings, one place. A policy pinned to either one is refused against the
+    other, and it fails as `delivery.unknown_address` — indistinguishable from
+    an agent actually trying to ship somewhere it should not. The `id` is
+    byte-identical on both endpoints.
+
+    This is the third thing the user owns. The agent reads where it is
+    delivering and has no tool that sets it, for the same reason it cannot write
+    the shopping list.
+    """
+
+    address_id: str
+    label: str
+    line: str
+
+
+#: The mock's address book. Two, because an address you cannot change is a
+#: setting rather than a decision, and the picker should have something to pick.
+def seed_addresses() -> tuple[Address, ...]:
+    return (
+        Address("home", "Home", "12 Nandidurga Rd, Bengaluru"),
+        Address("office", "Office", "Diamond District, Old Airport Rd, Bengaluru"),
+    )
 
 
 # The weekly basket, seeded. Named explicitly rather than derived from the

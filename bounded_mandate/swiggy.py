@@ -41,6 +41,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
+from .basket import Address
 from .categories import FEES as FEES_CATEGORY
 from .categories import categorise
 from .engine import Cart, CartItem
@@ -220,6 +221,28 @@ class SwiggyAdapter:
 
     # --- agent-facing -------------------------------------------------------
 
+    def addresses(self) -> list[Address]:
+        """The user's address book, as the account holds it.
+
+        `addressLine` is the composite Swiggy shows a person; the cart reports
+        only the street part. Both are presentation, which is why `address_id`
+        is what reaches the policy and these two only reach the card.
+        """
+        rows = self._invoke("get_addresses").get("addresses") or []
+        return [
+            Address(
+                address_id=str(row.get("id") or row.get("addressId") or ""),
+                label=str(row.get("addressTag") or row.get("addressCategory") or "Address"),
+                line=str(row.get("addressLine") or ""),
+            )
+            for row in rows
+            if row.get("id") or row.get("addressId")
+        ]
+
+    def use_address(self, address_id: str) -> None:
+        """Where the next cart ships. A user decision, pushed down to the session."""
+        self._address_id = address_id
+
     def address_id(self) -> str:
         """The pinned address, or the first one the account has."""
         if self._address_id:
@@ -375,6 +398,32 @@ class SwiggyAdapter:
                 )
             )
 
+        # Swiggy lists an item at a price the bill does not necessarily charge.
+        # A live cart arrived carrying a festive freebie nobody added — a ₹89
+        # rakhi in `items[]`, absent from `Item Total`. Two different residuals
+        # were being conflated into one ₹1 rounding tolerance, so a legitimate
+        # promotion looked identical to a cart that does not add up.
+        #
+        # They are separated here. The goods reconcile against the bill's own
+        # item total, which keeps every line visible at its listed price while
+        # the arithmetic stays exact; what remains is rounding, and that keeps
+        # its tight bound below.
+        #
+        # A free thing is still a thing: it stays in the cart as a line, so it
+        # is still categorised, and something the user did not ask for still
+        # reaches them as a question rather than arriving in the box.
+        billed_goods = _item_total_from(payload)
+        if billed_goods is not None:
+            adjustment = billed_goods - sum(item.price_paise for item in items)
+            if adjustment:
+                items.append(
+                    CartItem(
+                        name="Discounts and free items" if adjustment < 0 else "Basket adjustment",
+                        price_paise=adjustment,
+                        category=FEES_CATEGORY,
+                    )
+                )
+
         total = to_paise(_total_from(payload))
 
         # Fees become lines, because the cap checks the sum of lines and the
@@ -404,9 +453,12 @@ class SwiggyAdapter:
             # it as a visible line means the cap sees the real figure and the
             # card can show where the odd paise went.
             items.append(CartItem(name="Rounding", price_paise=residual, category=FEES_CATEGORY))
-        address = (payload.get("selectedAddressDetails") or {}).get("address") or payload.get(
-            "selectedAddress"
-        )
+        # The **id**, never the prose. `get_addresses` and `get_cart` format the
+        # same address two different ways — see `basket.Address` — so a policy
+        # matched against the text is refused against its own address. The id is
+        # byte-identical on both endpoints.
+        details = payload.get("selectedAddressDetails") or {}
+        address = details.get("id") or payload.get("selectedAddress")
         cart = Cart(
             cart_id=cart_id_for(items, total),
             merchant=MERCHANT_NAME,
@@ -489,6 +541,22 @@ def _fee_lines(payload: dict) -> list[CartItem]:
             continue  # a free delivery is not a line worth showing
         lines.append(CartItem(name=label, price_paise=charge, category=FEES_CATEGORY))
     return lines
+
+
+def _item_total_from(payload: dict) -> int | None:
+    """What the bill charges for the goods.
+
+    Distinct from what the item rows add up to, and the two differ whenever
+    there is a discount or an unbilled item. `None` means the bill did not say,
+    in which case there is nothing to reconcile against and the item rows stand.
+    """
+    breakdown = payload.get("billBreakdown") or {}
+    for entry in breakdown.get("lineItems") or []:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("label") or "").strip().casefold() in _ITEM_TOTAL_LABELS:
+            return to_paise(_amount(entry.get("value")))
+    return None
 
 
 def _amount(value: object) -> object:

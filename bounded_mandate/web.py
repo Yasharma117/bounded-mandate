@@ -31,7 +31,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .agent import ADVERSARIAL_SYSTEM, BuyerAgent
-from .basket import ListKind, ShoppingList, seed_lists
+from .basket import ListKind, ShoppingList, seed_addresses, seed_lists
 from .categories import FEES, with_fees
 from .commerce import build as build_commerce
 from .commerce import is_live
@@ -40,6 +40,7 @@ from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import Ledger
 from .merchant import UnknownItem, UnknownMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
+from .swiggy import ADDRESS_ID as SWIGGY_ADDRESS_ID
 from .voice import SPEAKERS, TTS_PROVIDER, VoiceUnavailable, speak, transcribe
 from .wording import summary, title
 
@@ -91,7 +92,14 @@ class Grant:
 
 STATIC = Path(__file__).parent / "static"
 
-HOME = "12 Nandidurga Rd, Bengaluru"
+#: Where things get delivered, as an **address id**. The engine matches on this
+#: and never on the prose — see `basket.Address` for why that distinction is
+#: load-bearing rather than tidy.
+#:
+#: On the live path it starts at the pinned `SWIGGY_ADDRESS_ID`; on the mock, at
+#: the first seeded address. Either way the *user* changes it, and there is no
+#: agent tool that reaches the route which does.
+DELIVERY_ID: str = SWIGGY_ADDRESS_ID if is_live() else seed_addresses()[0].address_id
 
 # One process-wide engine context. A real deployment would key these per user;
 # the demo has one mandate and one merchant, so a module-level store is honest
@@ -109,7 +117,7 @@ POLICIES: dict[str, Policy] = {
         per_txn_max_paise=200_000,
         merchants=frozenset({"instamart"}),
         categories=with_fees({"groceries"}),
-        delivery_addresses=frozenset({HOME}),
+        delivery_addresses=frozenset({DELIVERY_ID}),
         max_charges_per_window=1,
         window_days=4,
         status=MandateStatus.ACTIVE,
@@ -197,6 +205,10 @@ def _rendered(decision, *, claimed_total_paise: int, cart_items: int) -> dict:
             else "Nothing was charged"
         ),
         "cart_id": decision.cart_id,
+        # The id, resolved to a label by the app against the book it already
+        # holds. Rendering it here would mean an address-book call per decision,
+        # which on the live path is a network round trip to print one word.
+        "delivery_id": cart.delivery_address if cart else None,
         "real_total_paise": decision.total_paise,
         "claimed_total_paise": claimed_total_paise,
         "idempotency_key": decision.idempotency_key,
@@ -459,7 +471,7 @@ class ProposalRequest(BaseModel):
 def submit_proposal(body: ProposalRequest) -> dict:
     """A cart, proposed directly. The engine decides; only an ALLOW reaches the rail."""
     try:
-        cart = MARKETPLACE.create_cart(body.items, delivery_address=HOME, merchant=body.merchant)
+        cart = MARKETPLACE.create_cart(body.items, merchant=body.merchant)
     except UnknownMerchant as exc:
         raise HTTPException(400, str(exc.args[0])) from exc
     except UnknownItem as exc:
@@ -498,7 +510,7 @@ def run_agent(body: Instruction) -> dict:
         policies=POLICIES,
         ledger=LEDGER,
         mandate_id="mdt_demo",
-        delivery_address=HOME,
+        delivery_address=DELIVERY_ID,
         system=ADVERSARIAL_SYSTEM if body.adversarial else None,
     )
     try:
@@ -678,6 +690,83 @@ def catalog(q: str = "") -> dict:
     made. `comparable` says which it is rather than leaving the app to guess.
     """
     return {"offers": _offer_rows(q), "live": is_live(), "comparable": not is_live()}
+
+
+# --- where things get delivered ---------------------------------------------
+#
+# The third user-owned document, and the one with the sharpest edge on it. A
+# mandate that bounds the cap, the shop and the scope is still worth nothing if
+# an agent can change the doorstep — ₹1,900 of perfectly ordinary groceries,
+# entirely in policy, sent to a stranger.
+#
+# So the address book is read from the merchant, the *user* picks one, and the
+# choice is pushed down to the commerce session and up into the policy in the
+# same act. There is no agent tool that reaches either route, for the same
+# reason none writes the shopping list.
+#
+# What travels is the **id**. Never the prose — `basket.Address` has the receipt
+# for why.
+
+
+class AddressChoice(BaseModel):
+    address_id: str = Field(min_length=1, description="An id from the user's own address book")
+
+
+def _address_rows() -> list[dict]:
+    """The book, with the policy's answer attached to each row."""
+    policy = POLICIES["mdt_demo"]
+    try:
+        book = MARKETPLACE.addresses()
+    except Exception as exc:  # a merchant outage is a 503, not an empty book
+        raise HTTPException(503, f"could not read your addresses: {exc}") from exc
+    return [
+        {
+            "address_id": address.address_id,
+            "label": address.label,
+            "line": address.line,
+            "selected": address.address_id == DELIVERY_ID,
+            "authorised": address.address_id in policy.delivery_addresses,
+        }
+        for address in book
+    ]
+
+
+@app.get("/api/addresses")
+def all_addresses() -> dict:
+    """Every address on the account, and which one orders currently go to."""
+    return {"addresses": _address_rows(), "delivery_id": DELIVERY_ID}
+
+
+@app.put("/api/address")
+def choose_address(body: AddressChoice) -> dict:
+    """Deliver here from now on. **A user action, and only a user action.**
+
+    Selecting is authorising, and that is honest rather than lax: every row in
+    the book is already an address on the user's own account, so there is no
+    third party to introduce. What the mandate stops is somebody *else* — the
+    agent, or a one-time grant — adding one.
+
+    The new address **replaces** the authorised set rather than joining it. A
+    mandate should authorise where you are actually delivering; addresses that
+    quietly accumulate are authority nobody remembers granting.
+    """
+    global DELIVERY_ID
+
+    known = {row["address_id"]: row for row in _address_rows()}
+    if body.address_id not in known:
+        raise HTTPException(404, "that address is not on your account")
+
+    DELIVERY_ID = body.address_id
+    # Swiggy holds the delivery address on the session, so the choice has to
+    # reach the merchant too — otherwise the cart ships somewhere the policy
+    # then refuses, and the refusal names the wrong thing.
+    MARKETPLACE.use_address(DELIVERY_ID)
+    for mandate_id, policy in list(POLICIES.items()):
+        # Grants pin their own basket and its address. Only standing rules move.
+        if policy.cart_id is None:
+            POLICIES[mandate_id] = replace(policy, delivery_addresses=frozenset({DELIVERY_ID}))
+
+    return {"addresses": _address_rows(), "delivery_id": DELIVERY_ID}
 
 
 def _list_rows(shopping: ShoppingList) -> dict:
@@ -922,9 +1011,7 @@ def run_due_lists(now: datetime | None = None) -> list[dict]:
         if not shopping.due(now):
             continue
         try:
-            cart = MARKETPLACE.create_cart(
-                list(shopping.item_names), delivery_address=HOME, merchant="instamart"
-            )
+            cart = MARKETPLACE.create_cart(list(shopping.item_names), merchant="instamart")
         except (UnknownMerchant, UnknownItem) as exc:
             out.append({"list_id": list_id, "error": str(exc.args[0])})
             continue

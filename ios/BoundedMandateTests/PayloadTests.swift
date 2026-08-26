@@ -425,6 +425,33 @@ struct CardCopyTests {
         #expect(!decision.grantable)
     }
 
+    // MARK: - where things get delivered
+
+    @Test func theAddressBookSaysWhereOrdersGo() throws {
+        struct Book: Decodable { let addresses: [DeliveryAddress] }
+        let book = try decode(Book.self, "addresses").addresses
+
+        #expect(book.count == 2)
+        let selected = try #require(book.first { $0.selected })
+        #expect(selected.label == "Home")
+        // Selected and authorised are answered separately by the server, and
+        // the row renders both — an address you deliver to that your rule does
+        // not permit is a state worth being able to show.
+        #expect(selected.authorised)
+        #expect(book.filter(\.selected).count == 1)
+    }
+
+    @Test func anAddressIsIdentifiedByItsIDNotItsText() throws {
+        struct Book: Decodable { let addresses: [DeliveryAddress] }
+        let book = try decode(Book.self, "addresses").addresses
+
+        // The engine matches on this. If a client ever keyed off `line`, the
+        // live path would break silently — Swiggy formats one address two ways.
+        #expect(book.allSatisfy { !$0.addressID.isEmpty })
+        #expect(Set(book.map(\.id)).count == book.count)
+        #expect(book.allSatisfy { $0.addressID != $0.line })
+    }
+
     @Test func theRefusalThatPromptsAnApprovalOffersOne() throws {
         let escalated = try #require(try decode(AgentTurn.self, "turn_escalate").decision)
         let denied = try #require(try decode(AgentTurn.self, "turn_deny").decision)

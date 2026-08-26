@@ -10,13 +10,16 @@ from __future__ import annotations
 
 import inspect
 import json
+import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from bounded_mandate import Proposal, Verdict, decide
-from bounded_mandate.categories import categorise
-from bounded_mandate.engine import CartItem
+from bounded_mandate.categories import categorise, with_fees
+from bounded_mandate.engine import CartItem, Policy
+from bounded_mandate.ledger import Ledger
 from bounded_mandate.swiggy import (
     ALLOWED_TOOLS,
     SwiggyAdapter,
@@ -27,6 +30,27 @@ from bounded_mandate.swiggy import (
 from tests.conftest import NOW
 
 PAYLOADS = Path(__file__).parent / "payloads"
+
+
+def _grocery_policy():
+    from tests.conftest import HOME
+
+    return Policy(
+        mandate_id="mdt_1",
+        per_txn_max_paise=200_000,
+        merchants=frozenset({"instamart"}),
+        categories=with_fees({"groceries"}),
+        delivery_addresses=frozenset({HOME}),
+        max_charges_per_window=2,
+        window_days=7,
+    )
+
+
+def _holding(cart):
+    from tests.conftest import merchant_holding
+
+    return merchant_holding(cart)
+
 
 #: Tools that place a real, non-cancellable, cash-on-delivery order.
 LIVE_WIRES = ("checkout", "confirm_order", "place_order", "place_food_order")
@@ -615,6 +639,89 @@ class TestRealPayloadShapes:
         assert goods == 11_600
         assert report.total_paise == 15_900
         assert report.total_paise - goods > goods * 0.35
+
+    def test_the_cart_carries_the_address_id_not_the_prose(self):
+        """The two endpoints format one address two different ways.
+
+        `get_addresses` returns the composite Swiggy shows a person; `get_cart`
+        returns only the street part. A policy pinned to either is refused
+        against the other — and it fails as `delivery.unknown_address`, which is
+        indistinguishable from an agent shipping somewhere it should not.
+
+        Shape verified against a live account on 2026-08-26. The address book
+        itself is not committed: it is a real name, phone number and home.
+        """
+        payload = self.cart()
+        details = payload["selectedAddressDetails"]
+
+        # What `get_addresses` calls the very same address.
+        address_line = "<name>: <flat>, <area>, " + details["address"]
+        assert address_line != details["address"], "the two forms are not the same string"
+
+        cart = self.adapter(payload).read_cart().cart
+        assert cart.delivery_address == details["id"]
+        assert cart.delivery_address not in (address_line, details["address"])
+
+
+class TestAnUnbilledItem:
+    """Captured live on 2026-08-26: a festive rakhi nobody added, sitting in
+    `items[]` at ₹89 and absent from `Item Total`.
+
+    Two different residuals were being conflated into one ₹1 rounding
+    tolerance, so a legitimate promotion was indistinguishable from a cart that
+    does not add up — and the adapter refused the whole basket.
+    """
+
+    def cart(self):
+        return json.loads((PAYLOADS / "swiggy_cart_promo.json").read_text())
+
+    def adapter(self, payload):
+        return SwiggyAdapter(lambda tool, **_: payload, address_id="addr_1")
+
+    def test_the_captured_cart_really_does_carry_an_unbilled_item(self):
+        payload = self.cart()
+        listed = sum(
+            (line.get("discountedFinalPrice") or line["mrp"]) * (line.get("quantity") or 1)
+            for line in payload["items"]
+        )
+        billed = next(
+            e for e in payload["billBreakdown"]["lineItems"] if e["label"] == "Item Total"
+        )
+        assert listed * 100 != to_paise(billed["value"]), "the fixture no longer exercises this"
+
+    def test_it_reconciles_to_what_swiggy_will_charge(self):
+        report = self.adapter(self.cart()).read_cart()
+        assert sum(i.price_paise for i in report.cart.items) == report.total_paise
+        assert report.total_paise == 15_500
+
+    def test_the_free_thing_is_still_a_thing(self):
+        """It stays in the cart as a line, so it is still categorised — and
+        something the user did not ask for reaches them as a question rather
+        than arriving in the box."""
+        report = self.adapter(self.cart()).read_cart()
+        rakhi = next(i for i in report.cart.items if "Rakhi" in i.name)
+        assert rakhi.category == "", "an unasked-for item must not classify as anything"
+
+        decision = decide(
+            Proposal("mdt_1", report.cart.cart_id, report.total_paise),
+            policies={
+                "mdt_1": replace(
+                    _grocery_policy(), delivery_addresses=frozenset({report.cart.delivery_address})
+                )
+            },
+            adapter=_holding(report.cart),
+            ledger=Ledger(Path(tempfile.mkdtemp()) / "ledger.jsonl"),
+            now=NOW,
+        )
+        assert decision.verdict is Verdict.CLARIFY
+        assert "category.unknown" in decision.reason_code
+
+    def test_a_cart_that_genuinely_does_not_add_up_is_still_refused(self):
+        """The tolerance was loosened for the goods, not for the bill."""
+        payload = self.cart()
+        payload["billBreakdown"]["toPay"]["value"] = "₹900"
+        with pytest.raises(SwiggyUnavailable, match="does not add up"):
+            self.adapter(payload).read_cart()
 
 
 class TestUpdateCartNeedsBothIds:

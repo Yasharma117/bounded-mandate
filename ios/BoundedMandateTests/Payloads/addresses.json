@@ -1,0 +1,19 @@
+{
+ "addresses": [
+  {
+   "address_id": "home",
+   "label": "Home",
+   "line": "12 Nandidurga Rd, Bengaluru",
+   "selected": true,
+   "authorised": true
+  },
+  {
+   "address_id": "office",
+   "label": "Office",
+   "line": "Diamond District, Old Airport Rd, Bengaluru",
+   "selected": false,
+   "authorised": false
+  }
+ ],
+ "delivery_id": "home"
+}

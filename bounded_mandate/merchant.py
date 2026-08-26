@@ -23,6 +23,7 @@ from dataclasses import dataclass, replace
 from itertools import count
 
 from .basket import USUAL_GROCERIES as USUAL_GROCERIES  # re-export; the list is the user's
+from .basket import Address, seed_addresses
 from .engine import Cart, CartItem
 
 # Prices in paise. The twelve groceries total exactly ₹1,850 — the demo's
@@ -142,7 +143,7 @@ class MockMerchant:
         return [i for i in self.catalog.values() if q in i.name.casefold() or q == i.category]
 
     def create_cart(
-        self, item_names: list[str], *, delivery_address: str, categories: dict | None = None
+        self, item_names: list[str], *, delivery_address: str = "", categories: dict | None = None
     ) -> Cart:
         """Build and store a cart. Returns it, but the id is what travels."""
         try:
@@ -204,6 +205,21 @@ class Marketplace:
             "blinkit": MockMerchant("blinkit", BLINKIT_CATALOG),
             "zepto": MockMerchant("zepto", ZEPTO_CATALOG),
         }
+        self._delivery = seed_addresses()[0].address_id
+
+    # --- where things go ----------------------------------------------------
+    #
+    # Session state, set by the user and read by everything else. Swiggy models
+    # it the same way — the address lives on the session, not on the call — and
+    # matching that here is what keeps the two backends interchangeable.
+
+    def addresses(self) -> list[Address]:
+        """The user's address book."""
+        return list(seed_addresses())
+
+    def use_address(self, address_id: str) -> None:
+        """Where the next cart ships. A user decision, pushed down."""
+        self._delivery = address_id
 
     def __getitem__(self, merchant: str) -> MockMerchant:
         """Case-insensitive, because a shop name is something a person types in
@@ -232,12 +248,17 @@ class Marketplace:
         self,
         item_names: list[str],
         *,
-        delivery_address: str,
+        delivery_address: str = "",
         merchant: str,
         categories: dict | None = None,
     ) -> Cart:
+        """`delivery_address` is an override for tests. Callers leave it unset
+        and get the address the *user* selected — the agent has no say in it and
+        no argument here it could reach."""
         return self[merchant].create_cart(
-            item_names, delivery_address=delivery_address, categories=categories
+            item_names,
+            delivery_address=delivery_address or self._delivery,
+            categories=categories,
         )
 
     def fetch_cart(self, cart_id: str) -> Cart | None:

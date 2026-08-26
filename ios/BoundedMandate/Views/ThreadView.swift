@@ -123,6 +123,7 @@ struct ThreadView: View {
     @FocusState private var writing: Bool
     // DEV: -BMOpenList YES opens straight to the list.
     @State private var showingList = UserDefaults.standard.bool(forKey: "BMOpenList")
+    @State private var showingAddress = UserDefaults.standard.bool(forKey: "BMOpenAddress")
     // DEV: -BMOpenVoice YES starts in voice mode.
     @State private var voice: VoiceSession?
     @Namespace private var glass
@@ -178,6 +179,12 @@ struct ThreadView: View {
 
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingAddress = true } label: {
+                        Image(systemName: "mappin.and.ellipse")
+                    }
+                    .accessibilityLabel("Delivery address")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { showingList = true } label: {
                         Image(systemName: "list.bullet.rectangle")
                     }
@@ -185,6 +192,7 @@ struct ThreadView: View {
                 }
             }
             .sheet(isPresented: $showingList) { ListSheet() }
+            .sheet(isPresented: $showingAddress) { AddressSheet() }
             // One ring per hand-over: you stopped, it is thinking, it is
             // speaking. Voice has no cursor, so the screen has to say so.
             .onChange(of: voice?.phase) { pulse += 1 }

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from bounded_mandate import web
 from bounded_mandate.basket import USUAL_GROCERIES
-from bounded_mandate.engine import Verdict
+from bounded_mandate.engine import Proposal, Verdict, decide
 from bounded_mandate.razorpay_gateway import GatewayAuthError, GatewayError, SignatureMismatch
 from tests.conftest import FakeGateway  # noqa: F401  — used by tests below
 
@@ -560,3 +560,65 @@ def test_a_user_can_reclassify_a_line(client):
         },
     ).json()
     assert body["items"][0]["category"] == "household"
+
+
+# --- where things get delivered ----------------------------------------------
+
+
+def test_the_address_book_says_which_one_orders_go_to(client):
+    out = client.get("/api/addresses").json()
+
+    assert [a["label"] for a in out["addresses"]] == ["Home", "Office"]
+    selected = [a for a in out["addresses"] if a["selected"]]
+    assert len(selected) == 1
+    assert selected[0]["address_id"] == out["delivery_id"] == "home"
+    # Selected and authorised are two different questions, answered separately.
+    assert selected[0]["authorised"]
+
+
+def test_choosing_an_address_moves_both_the_cart_and_the_policy(client):
+    client.put("/api/address", json={"address_id": "office"})
+
+    assert web.POLICIES["mdt_demo"].delivery_addresses == frozenset({"office"})
+    out = propose(client, USUAL, 185_000)
+    assert out["delivery_id"] == "office"
+    # And it still clears — the point is that the policy moved with it, not that
+    # the check was skipped.
+    assert out["verdict"] == "ALLOW"
+
+
+def test_the_previous_address_stops_being_authorised(client):
+    """Replaced, not accumulated. A mandate should authorise where you actually
+    deliver; addresses that pile up are authority nobody remembers granting."""
+    client.put("/api/address", json={"address_id": "office"})
+
+    stale = web.MARKETPLACE.create_cart(USUAL, delivery_address="home", merchant="instamart")
+    decision = decide(
+        Proposal("mdt_demo", stale.cart_id, stale.total_paise),
+        policies=web.POLICIES,
+        adapter=web.MARKETPLACE,
+        ledger=web.LEDGER,
+    )
+
+    assert "delivery.unknown_address" in decision.reason_code
+
+
+def test_an_address_not_on_the_account_is_refused(client):
+    """The one thing selection must not become: a way to introduce a doorstep."""
+    before = web.POLICIES["mdt_demo"].delivery_addresses
+
+    response = client.put("/api/address", json={"address_id": "9 Somebody Elses Lane"})
+
+    assert response.status_code == 404
+    assert web.POLICIES["mdt_demo"].delivery_addresses == before
+
+
+def test_the_agent_holds_no_tool_that_moves_the_address(client):
+    """`_create_cart` takes items and a merchant. There is no third argument,
+    which is why an injected prompt has nowhere to put an address."""
+    import inspect
+
+    from bounded_mandate.agent import BuyerAgent
+
+    args = inspect.signature(BuyerAgent._create_cart).parameters
+    assert set(args) == {"self", "item_names", "merchant"}
