@@ -94,6 +94,12 @@ class FakeGateway:
         return "order_charge_1"
 
 
+#: Captured at import, before any test can add a one-time grant to the live
+#: dict. A grant is an ordinary Policy in `web.POLICIES`, so without this the
+#: mandates one test mints are still standing in the next.
+SEED_POLICIES = dict(web.POLICIES)
+
+
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     gw = FakeGateway()
@@ -101,6 +107,8 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(web, "LEDGER", Ledger(tmp_path / "ledger.jsonl"))
     monkeypatch.setattr(web, "MARKETPLACE", Marketplace())
     monkeypatch.setattr(web, "LISTS", seed_lists())
+    monkeypatch.setattr(web, "POLICIES", dict(SEED_POLICIES))
+    monkeypatch.setattr(web, "GRANTS", {})
     c = TestClient(web.app)
     c.gateway = gw
     return c

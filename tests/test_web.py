@@ -155,10 +155,19 @@ def test_a_callback_missing_any_field_is_refused(client, missing):
 
 def test_no_route_moves_money_without_an_engine_verdict(client):
     """Nothing here accepts \"charge this\" as an instruction. The rail is reached
-    only as a consequence of a proposal the engine allowed."""
+    only as a consequence of a proposal the engine allowed.
+
+    `/pay` is not a counterexample: it is a *page*, it takes no body, and the
+    order it renders was created by `_settle` under an ALLOW. It cannot mint one
+    — the test below spends the whole grant flow proving that.
+    """
     paths = {r.path for r in web.app.routes}
-    forbidden = {p for p in paths if "charge" in p or p.rstrip("/").endswith("/pay")}
-    assert not forbidden, forbidden
+    assert not {p for p in paths if "charge" in p}
+
+    before = list(client.gateway.charged)
+    assert client.get("/pay?grant=grant_nope").status_code == 200
+    assert client.post("/pay").status_code == 405
+    assert client.gateway.charged == before, "rendering the checkout charged something"
 
 
 def test_webhooks_are_refused_until_a_secret_is_configured(client, monkeypatch):

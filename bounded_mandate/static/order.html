@@ -128,7 +128,7 @@ $("pay").onclick = () => {
     key: pending.key_id, order_id: pending.order_id,
     amount: pending.real_total_paise, currency: "INR",
     name: "Bounded Mandate", description: "Authorised grocery order",
-    prefill: { name:"Yash Sharma", email:"yash.republic@gmail.com", contact:"8095551234" },
+    prefill: { name:"Bounded Mandate Demo", email:"demo@bounded-mandate.test", contact:"9999999999" },
     handler: async (r) => {
       try {
         const out = await post("/api/settlement/verify", r);

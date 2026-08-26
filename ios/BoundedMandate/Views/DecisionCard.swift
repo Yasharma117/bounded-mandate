@@ -10,7 +10,15 @@ import SwiftUI
 struct DecisionCard: View {
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openURL) private var openURL
     let decision: Decision
+
+    /// What the user approved, once they have. Held here rather than in the
+    /// thread because a grant belongs to the refusal that prompted it — it is
+    /// the answer to this card, and reads wrong anywhere else.
+    @State private var granted: GrantResponse?
+    @State private var granting = false
+    @State private var refusal: String?
 
     /// The cart opens by itself when something in it is the reason for the
     /// verdict — that is the moment the reader needs to see the lines, and
@@ -22,6 +30,25 @@ struct DecisionCard: View {
     private var tint: Color { theme.color(for: decision.verdict) }
 
     var body: some View {
+        VStack(spacing: 12) {
+            verdictCard
+            if let granted {
+                MandateCard(
+                    bounds: granted.grant.bounds,
+                    expiresIn: granted.grant.expiresIn,
+                    title: "One-time approval"
+                )
+                .arrives(reduceMotion)
+                if let checkout { reopen(checkout) }
+            }
+        }
+    }
+
+    private var checkout: URL? {
+        granted?.payPath.flatMap(Engine.url(forPath:))
+    }
+
+    private var verdictCard: some View {
         Card(tint: tint) {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 16) {
@@ -79,7 +106,84 @@ struct DecisionCard: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
+
+                if decision.grantable && granted == nil {
+                    Divider().overlay(theme.borderSubtle)
+                    approve
+                }
             }
+        }
+    }
+
+    /// The way out of a refusal that is *not* raising the rule.
+    ///
+    /// The button sends a cart id and nothing else. Everything it comes back
+    /// with — the cap, the shop, the address, the fifteen minutes — was derived
+    /// server-side from the basket the engine fetched, so what this affords is
+    /// the choice to approve, never the terms of it.
+    @ViewBuilder private var approve: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                Task { await mintGrant() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: granting ? "hourglass" : "checkmark.shield")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(granting ? "Approving…" : "Approve just this basket")
+                        .font(.system(size: 14, weight: .semibold))
+                    Spacer(minLength: 8)
+                    Text(rupees(decision.realTotalPaise))
+                        .font(.system(size: 14, weight: .semibold))
+                        .monospacedDigit()
+                }
+                .foregroundStyle(theme.orchid)
+                .padding(.horizontal, 18)
+                .frame(minHeight: 48)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.pressable)
+            .disabled(granting)
+
+            if let refusal {
+                Text(refusal)
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.negative)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 12)
+            }
+        }
+    }
+
+    private func reopen(_ url: URL) -> some View {
+        Link(destination: url) {
+            HStack(spacing: 7) {
+                Image(systemName: "arrow.up.right.square")
+                Text("Open the checkout")
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(theme.orchid)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.pressable)
+    }
+
+    private func mintGrant() async {
+        granting = true
+        refusal = nil
+        defer { granting = false }
+        do {
+            let response = try await Engine.grantOneTime(cartID: decision.cartID)
+            withAnimation(Motion.respectful(Motion.enter(), reduced: reduceMotion)) {
+                granted = response
+            }
+            // The user just approved it; making them tap a second time to reach
+            // the checkout is friction with nothing behind it. The card stays
+            // as the record of what was approved.
+            if let checkout { openURL(checkout) }
+        } catch {
+            refusal = error.localizedDescription
         }
     }
 

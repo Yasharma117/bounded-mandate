@@ -379,6 +379,61 @@ struct CardCopyTests {
         #expect(Set(ordered.map(\.name)) == Set(decision.items.map(\.name)))
         #expect(ordered.map(\.pricePaise).reduce(0, +) == decision.realTotalPaise)
     }
+
+    // MARK: - the one-time approval
+    //
+    // Captured from a live run against Razorpay test mode. The publishable key
+    // is redacted — public by design or not, a fixture is not where credentials
+    // belong, and the shape is the whole reason these files exist.
+
+    @Test func theGrantDecodesWithBoundsTheAppDidNotAuthor() throws {
+        let response = try decode(GrantResponse.self, "grant")
+        let grant = response.grant
+
+        // Every one of these was derived server-side from the basket. The app
+        // sent a cart id and nothing else.
+        #expect(grant.perTxnMaxPaise == 1_500_000)
+        #expect(grant.merchants == ["instamart"])
+        #expect(grant.deliveryAddress == "12 Nandidurga Rd, Bengaluru")
+        #expect(grant.ordersPerWindow == 1)
+        #expect(grant.cartID == "instamart_cart_1")
+        #expect(grant.state == "ready")
+        #expect(response.payPath == "/pay?grant=\(grant.grantID)")
+    }
+
+    @Test func theGrantExpiryIsReadable() throws {
+        let grant = try decode(GrantResponse.self, "grant").grant
+
+        // Python emits fractional seconds; a formatter that refuses them returns
+        // nil, and the card then renders no expiry at all — the one thing a
+        // fifteen-minute approval must never look like.
+        let expiresAt = try #require(grant.expiresAt)
+        #expect(isoDate(expiresAt) != nil, "the expiry did not parse")
+    }
+
+    @Test func approvingRefusesNothingAndAuthorisesTheOneBasket() throws {
+        let response = try decode(GrantResponse.self, "grant")
+        let decision = try #require(response.decision)
+
+        #expect(decision.verdict == .allow)
+        #expect(decision.orderID?.hasPrefix("order_") == true)
+        // The grant is not a receipt. An order is not a payment, and the card
+        // must not read as though money already moved.
+        #expect(decision.paymentID == nil)
+        #expect(decision.realTotalPaise == response.grant.perTxnMaxPaise)
+        // Nothing left to approve — the card must not offer a second grant.
+        #expect(!decision.grantable)
+    }
+
+    @Test func theRefusalThatPromptsAnApprovalOffersOne() throws {
+        let escalated = try #require(try decode(AgentTurn.self, "turn_escalate").decision)
+        let denied = try #require(try decode(AgentTurn.self, "turn_deny").decision)
+
+        #expect(escalated.grantable)
+        // An agent that misreported its own basket is not a thing to wave
+        // through with one tap.
+        #expect(!denied.grantable)
+    }
 }
 
 private final class CopyBundleMarker {}

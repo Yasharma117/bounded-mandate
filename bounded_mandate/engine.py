@@ -88,6 +88,14 @@ class Policy:
     window_days: int
     status: MandateStatus = MandateStatus.ACTIVE
     expires_at: datetime | None = None
+    #: A one-time grant is authority over **one basket**, named here. `None` is
+    #: a standing mandate, where the cart is not known when the rule is written
+    #: and the other bounds are all there is to judge by.
+    #:
+    #: Without this, a grant approved for a ₹4,000 air fryer would also cover a
+    #: different ₹4,000 basket from the same shop inside the same fifteen
+    #: minutes — the substitution the user never looked at.
+    cart_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +188,15 @@ def _policy_reasons(cart: Cart, policy: Policy, prior_charges: int) -> list[Reas
             )
         )
 
+    if policy.cart_id is not None and cart.cart_id != policy.cart_id:
+        reasons.append(
+            Reason(
+                "grant.other_cart",
+                Verdict.DENY,
+                "This approval covers one specific basket, and this is not it.",
+            )
+        )
+
     unknown = [i.name for i in cart.items if not i.category]
     off_scope = [i.name for i in cart.items if i.category and i.category not in policy.categories]
     if off_scope:
@@ -190,7 +207,11 @@ def _policy_reasons(cart: Cart, policy: Policy, prior_charges: int) -> list[Reas
                 f"{_plural(len(off_scope), 'item')} outside your scope: {', '.join(off_scope)}.",
             )
         )
-    if unknown:
+    # A grant pins the exact basket and the user approved these lines by reading
+    # them. An unclassifiable line is what such a grant is *for* — asking "is
+    # this in scope?" about a basket the user personally approved is a question
+    # with nobody left to answer it.
+    if unknown and policy.cart_id is None:
         reasons.append(
             Reason(
                 "category.unknown",

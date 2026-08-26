@@ -19,7 +19,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from dataclasses import replace
+import secrets
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from html import escape
 from pathlib import Path
@@ -34,7 +35,7 @@ from .basket import ListKind, ShoppingList, seed_lists
 from .categories import FEES, with_fees
 from .commerce import build as build_commerce
 from .commerce import is_live
-from .compiler import compile_mandate
+from .compiler import GrantRefused, compile_mandate, grant_for_cart
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import Ledger
 from .merchant import UnknownItem, UnknownMerchant
@@ -57,6 +58,36 @@ async def _lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Bounded Mandate", docs_url="/api/docs", lifespan=_lifespan)
+
+
+@dataclass
+class Grant:
+    """A minted one-time approval, and the checkout it opened.
+
+    The bounds live in `policy`, which is the same object a standing mandate
+    compiles to — the engine cannot tell a grant from a rule, and does not need
+    to. What this adds is the money side: which Razorpay order the user was sent
+    to, and whether it has been paid.
+    """
+
+    grant_id: str
+    policy: Policy
+    cart_id: str
+    amount_paise: int
+    merchant: str
+    order_id: str | None
+    key_id: str | None
+    #: Set once a signed callback confirms the money moved. A grant pays once.
+    payment_id: str | None = None
+
+    def state(self, now: datetime | None = None) -> str:
+        now = now or datetime.now(UTC)
+        if self.payment_id:
+            return "paid"
+        if self.policy.expires_at and self.policy.expires_at <= now:
+            return "expired"
+        return "ready" if self.order_id else "refused"
+
 
 STATIC = Path(__file__).parent / "static"
 
@@ -84,6 +115,11 @@ POLICIES: dict[str, Policy] = {
         status=MandateStatus.ACTIVE,
     )
 }
+
+# One-time grants, minted by the user and spent once. Kept apart from POLICIES
+# only in that this half holds the *checkout* — the authority itself is an
+# ordinary Policy in POLICIES, judged by the same `decide()` as everything else.
+GRANTS: dict[str, Grant] = {}
 
 # Test-mode placeholders. A real deployment reads these off the signed-in user.
 DEMO_CUSTOMER = {
@@ -268,6 +304,148 @@ def verify_registration(body: Callback) -> dict:
     return {"verified": True, "token_id": token_id, "payment_id": body.razorpay_payment_id}
 
 
+# --- the one-time purchase --------------------------------------------------
+#
+# The standing rule covers the shopping. It does not cover the thing you needed
+# once — a ₹4,000 air fryer is not groceries, is over the cap, and *should* be
+# refused. The refusal is correct; it is not the end of the story.
+#
+# So: the user reads the basket the engine fetched and approves that one basket.
+# What they get is not an exception to the rule and not a raised cap. It is a
+# second mandate, minted from the cart, narrower than any sentence they could
+# have said, alive for fifteen minutes, and spendable once.
+#
+# The engine is not told which kind it is judging.
+
+
+class GrantRequest(BaseModel):
+    cart_id: str = Field(min_length=1, description="The basket the engine fetched and refused")
+
+
+def _standing_addresses() -> frozenset[str]:
+    """Where a standing rule already ships.
+
+    A grant may widen what and how much. It may not introduce an address, so
+    this deliberately reads only the standing mandates — a grant cannot bootstrap
+    the next grant's delivery scope.
+    """
+    return frozenset().union(
+        *(p.delivery_addresses for p in POLICIES.values() if p.cart_id is None), frozenset()
+    )
+
+
+def _grant_bounds(grant: Grant) -> dict:
+    """What the user is approving, as bounds rather than a price."""
+    policy = grant.policy
+    return {
+        "grant_id": grant.grant_id,
+        "per_txn_max_paise": policy.per_txn_max_paise,
+        "merchants": sorted(policy.merchants),
+        "categories": sorted(policy.categories),
+        "delivery_address": next(iter(policy.delivery_addresses), ""),
+        "every_days": policy.window_days,
+        "orders_per_window": policy.max_charges_per_window,
+        "cart_id": policy.cart_id,
+        "expires_at": policy.expires_at.isoformat() if policy.expires_at else None,
+        "state": grant.state(),
+    }
+
+
+@app.post("/api/mandate/one-time")
+def grant_once(body: GrantRequest) -> dict:
+    """Approve one basket, once.
+
+    **A user action, and only a user action.** The buyer agent holds no tool
+    that reaches this route — an agent able to mint its own authority is not
+    governed by any.
+
+    Every bound comes off the cart the *engine* fetched, so an agent that
+    misreported its basket cannot get a grant written around the lie: the
+    proposal that follows is judged against the real one, by the same `decide()`
+    that refused it a moment ago.
+    """
+    cart = MARKETPLACE.fetch_cart(body.cart_id)
+    if cart is None:
+        raise HTTPException(404, "no such basket")
+
+    # Approving twice should not mint twice. A live grant for this exact basket
+    # is the answer to the same question, and a second Razorpay order for a
+    # basket that is going to be paid once is just litter.
+    for existing in GRANTS.values():
+        if existing.cart_id == cart.cart_id and existing.state() == "ready":
+            return {"grant": _grant_bounds(existing), "pay_url": f"/pay?grant={existing.grant_id}"}
+
+    # Unguessable, because the pay URL *is* the capability.
+    grant_id = "grant_" + secrets.token_urlsafe(12)
+    try:
+        policy = grant_for_cart(cart, grant_id=grant_id, authorised_addresses=_standing_addresses())
+    except GrantRefused as exc:
+        raise HTTPException(403, str(exc)) from exc
+    POLICIES[grant_id] = policy
+
+    # The grant is authority, not approval. The engine still rules on the
+    # proposal, and an ALLOW here is what creates the order.
+    decision = decide(
+        Proposal(grant_id, cart.cart_id, cart.total_paise),
+        policies=POLICIES,
+        adapter=MARKETPLACE,
+        ledger=LEDGER,
+    )
+    rendered = _rendered(decision, claimed_total_paise=cart.total_paise, cart_items=len(cart.items))
+    grant = Grant(
+        grant_id=grant_id,
+        policy=policy,
+        cart_id=cart.cart_id,
+        amount_paise=decision.total_paise,
+        merchant=cart.merchant,
+        order_id=rendered.get("order_id"),
+        key_id=rendered.get("key_id"),
+    )
+    GRANTS[grant_id] = grant
+    return {
+        "grant": _grant_bounds(grant),
+        "decision": rendered,
+        "pay_url": f"/pay?grant={grant_id}" if grant.order_id else None,
+    }
+
+
+@app.get("/api/grant/{grant_id}")
+def read_grant(grant_id: str) -> dict:
+    """What the checkout page needs, and no more than that."""
+    grant = GRANTS.get(grant_id)
+    if grant is None:
+        raise HTTPException(404, "no such approval")
+    cart = MARKETPLACE.fetch_cart(grant.cart_id)
+    # Cart ids are content-addressed, so a basket that moved after the grant was
+    # minted no longer answers to the id the grant names. That is not a missing
+    # cart, it is a *different* one — and the order already sitting on Razorpay
+    # is for a total nobody has looked at since. Spendable stops here.
+    state = "stale" if cart is None and not grant.payment_id else grant.state()
+    return {
+        **_grant_bounds(grant),
+        "state": state,
+        "merchant": grant.merchant,
+        "amount_paise": grant.amount_paise,
+        # Present only while the grant is spendable. A lapsed or stale approval
+        # hands out no order id, so an old tab cannot open a checkout.
+        "order_id": grant.order_id if state == "ready" else None,
+        "key_id": grant.key_id if state == "ready" else None,
+        "payment_id": grant.payment_id,
+        "items": [
+            {"name": i.name, "price_paise": i.price_paise, "category": i.category}
+            for i in (cart.items if cart else ())
+        ],
+    }
+
+
+@app.get("/pay", response_class=HTMLResponse)
+def pay_page() -> str:
+    """Real Razorpay Standard Checkout, for the half of the product that has a
+    person in it. The standing mandate exists precisely so the *other* half does
+    not need this page."""
+    return (STATIC / "pay.html").read_text(encoding="utf-8")
+
+
 class ProposalRequest(BaseModel):
     items: list[str] = Field(
         min_length=1, description="Catalog item names the agent put in the cart"
@@ -367,12 +545,24 @@ def verify_settlement(body: Callback) -> dict:
     except SignatureMismatch as exc:
         raise HTTPException(400, "signature verification failed") from exc
 
+    # If this settled a one-time grant, the grant is now spent. Razorpay would
+    # refuse a second payment on a paid order anyway; revoking here means our
+    # own store says so too, rather than relying on the rail to remember.
+    grant = next(
+        (g for g in GRANTS.values() if g.order_id == body.razorpay_order_id and not g.payment_id),
+        None,
+    )
+    if grant is not None:
+        grant.payment_id = body.razorpay_payment_id
+        POLICIES[grant.grant_id] = replace(grant.policy, status=MandateStatus.REVOKED)
+
     LEDGER.append(
         {
             "event": "SETTLED",
             "razorpay_order_id": body.razorpay_order_id,
             "razorpay_payment_id": body.razorpay_payment_id,
             "signature_verified": True,
+            **({"grant_id": grant.grant_id} if grant else {}),
         }
     )
     return {"verified": True, "payment_id": body.razorpay_payment_id}

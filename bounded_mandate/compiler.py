@@ -20,12 +20,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from .categories import with_fees
-from .engine import MandateStatus, Policy
+from .engine import Cart, MandateStatus, Policy
 from .llm import complete_json
 
 SYSTEM = """You compile a spoken purchasing rule into a machine-readable mandate.
@@ -182,6 +183,69 @@ def render(compiled: Compiled) -> str:
         lines.append("  Confirm and register.")
     lines.append(f"  [compiled by {compiled.source}]")
     return "\n".join(lines)
+
+
+# --- the one-time grant ------------------------------------------------------
+#
+# A standing mandate is written before the cart exists, so it can only be
+# written in bounds: a cap, a shop, a scope. A one-time grant is the opposite —
+# the basket already exists and the user is looking at it — so it is derived
+# *from* the basket, and is narrower than any sentence could have been.
+#
+# It is minted by a user action and by nothing else. No agent tool reaches it,
+# for the same reason none writes the shopping list: an agent that can grant
+# itself authority is not governed by one.
+
+#: Long enough to reach for a phone, short enough that a grant left open on a
+#: screen is not standing authority by accident.
+GRANT_TTL = timedelta(minutes=15)
+
+
+class GrantRefused(Exception):
+    """This basket may not be granted, whatever the user asked for."""
+
+
+def grant_for_cart(
+    cart: Cart,
+    *,
+    grant_id: str,
+    authorised_addresses: frozenset[str],
+    now: datetime | None = None,
+) -> Policy:
+    """One basket, one payment, fifteen minutes.
+
+    Every bound is read off the cart the **engine** fetched, never off anything
+    the agent reported. The agent's part in a one-time purchase is to have found
+    a basket and been refused; the authority comes from the person who then
+    looked at it.
+
+    The grant widens *what* and *how much* — that is what it is for. It may not
+    widen *where*: a basket shipping to an address no standing rule authorises
+    is refused outright rather than approved by a user reading a card that shows
+    them a price and a shop.
+    """
+    now = now or datetime.now(UTC)
+    if not cart.items:
+        raise GrantRefused("There is nothing in this basket to approve.")
+    if cart.delivery_address not in authorised_addresses:
+        raise GrantRefused(
+            "This basket ships to an address you have not authorised. Add it to "
+            "your standing rule first — a one-time approval cannot introduce one."
+        )
+    return Policy(
+        mandate_id=grant_id,
+        # Exactly this basket, not a round number near it.
+        per_txn_max_paise=cart.total_paise,
+        merchants=frozenset({cart.merchant}),
+        categories=with_fees(item.category for item in cart.items if item.category),
+        delivery_addresses=frozenset({cart.delivery_address}),
+        max_charges_per_window=1,
+        window_days=1,
+        status=MandateStatus.ACTIVE,
+        expires_at=now + GRANT_TTL,
+        # The bound that makes it a grant rather than a small standing mandate.
+        cart_id=cart.cart_id,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - eyeball a real provider call

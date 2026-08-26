@@ -1,0 +1,44 @@
+{
+ "grant": {
+  "grant_id": "grant_Zu7eP9dO9noFSUhC",
+  "per_txn_max_paise": 1500000,
+  "merchants": [
+   "instamart"
+  ],
+  "categories": [
+   "electronics",
+   "fees"
+  ],
+  "delivery_address": "12 Nandidurga Rd, Bengaluru",
+  "every_days": 1,
+  "orders_per_window": 1,
+  "cart_id": "instamart_cart_1",
+  "expires_at": "2026-08-26T11:56:48.143329+00:00",
+  "state": "ready"
+ },
+ "decision": {
+  "items": [
+   {
+    "name": "Smartwatch",
+    "price_paise": 1500000,
+    "category": "electronics",
+    "url": "/m/instamart/p/Smartwatch",
+    "off_scope": false,
+    "unclassified": false
+   }
+  ],
+  "merchant": "instamart",
+  "verdict": "ALLOW",
+  "reason_code": "ok.in_policy",
+  "summary": "Within your rule",
+  "reasons": [],
+  "settlement": "Order placed, not yet paid",
+  "cart_id": "instamart_cart_1",
+  "real_total_paise": 1500000,
+  "claimed_total_paise": 1500000,
+  "idempotency_key": "a0c535aa65ef3184f6529ecfb0f656c4",
+  "order_id": "order_TUNxpcqCUkcZBL",
+  "key_id": "rzp_test_REDACTED"
+ },
+ "pay_url": "/pay?grant=grant_Zu7eP9dO9noFSUhC"
+}

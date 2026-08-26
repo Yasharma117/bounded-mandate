@@ -538,6 +538,53 @@ The key secret never leaves the server process. The page receives `key_id`,
 which is public by design, from the order response rather than from a
 build-time environment variable, so there is no frontend env prefix to leak.
 
+### The third leg: a one-time purchase
+
+The standing rule covers the shopping. It does not cover the thing you needed
+once, and a ₹15,000 smartwatch under a groceries-only ₹2,000 rule is refused on
+three separate counts. **That refusal is correct.** It is not the end of it.
+
+`POST /api/mandate/one-time` takes a cart id and nothing else. What comes back
+is not an exception and not a raised cap — it is a **second mandate**, compiled
+from the basket the *engine* fetched:
+
+| Bound | Where it comes from |
+|---|---|
+| cap | the cart's own total, to the paise |
+| merchant | the cart's merchant |
+| categories | the cart's own lines |
+| delivery address | the cart's address, **and only if a standing rule already ships there** |
+| cadence | once, then it is gone |
+| expiry | fifteen minutes |
+| basket | `Policy.cart_id` — this one, not one like it |
+
+Then `decide()` rules on it, exactly as it ruled a moment earlier. The engine is
+not told which kind of mandate it is judging, and no new verdict path exists.
+
+Four things it deliberately cannot do:
+
+- **It cannot introduce a delivery address.** A grant widens *what* and *how
+  much*; the card a user approves shows a price and a shop, which is not where
+  anyone notices a stranger's doorstep. Minting is refused outright instead.
+- **It cannot be spent on a different basket.** `Policy.cart_id` is the new
+  bound and the only one added to the engine for this. Without it, an approval
+  for a ₹15,000 smartwatch is also an approval for any other ₹15,000 basket at
+  the same shop for the next fifteen minutes — the substitution nobody looked
+  at. A different cart is `grant.other_cart`, a DENY.
+- **It cannot be minted by the agent.** There is no tool that reaches the route,
+  for the same reason none writes the shopping list.
+- **It cannot survive the basket moving.** Cart ids are content-addressed, so a
+  basket that changed after approval answers to a different id, and the grant
+  stops handing out its checkout rather than settling a total nobody re-read.
+
+The app's part is one button on a refusal, and it sends a cart id. Everything it
+gets back was written server-side. `GET /pay` is a page, not a route that moves
+money: the order it renders was created by `_settle` under an ALLOW, and a test
+spends the whole flow proving it cannot mint one.
+
+Captured live: escalation `category.not_allowed+cap.exceeded+frequency.exceeded`,
+then a grant, then `ALLOW` and a real test-mode order — `order_TUNxpcqCUkcZBL`.
+
 ### Verified against the live test API
 
 | Fact | Result |
@@ -705,8 +752,12 @@ stops at *engine allows → real order created with nobody present*, which is th
 half that proves the architecture; the half that is blocked is the half that is
 purely Razorpay account configuration.
 
-Next: the one-time purchase grant with its real checkout, an app icon, and the
-recorded walkthrough.
+**Phase 3 (the one-time purchase) — built.** `POST /api/mandate/one-time` mints
+a second mandate from the basket the engine fetched, `GET /pay` is a real
+Standard Checkout, and paying revokes the grant. 279 Python tests and 31 Swift
+tests, no network.
+
+Next: an app icon and the recorded walkthrough.
 
 ## Commerce: an adapter, and a mock behind it
 

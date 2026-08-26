@@ -24,6 +24,7 @@ TITLES: dict[str, str] = {
     "provenance.total_mismatch": "The agent misreported the total",
     "provenance.cart_not_found": "No such basket",
     "duplicate.suppressed": "Already ordered",
+    "grant.other_cart": "A different basket to the one you approved",
     # Mandate state.
     "mandate.unknown": "No such rule",
     "mandate.revoked": "Rule was cancelled",

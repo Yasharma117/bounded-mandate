@@ -113,6 +113,15 @@ struct Decision: Codable, Hashable, Sendable, Identifiable {
     /// The agent misreported its own cart. The engine caught it by refetching.
     var lied: Bool { claimedTotalPaise != realTotalPaise }
 
+    /// Whether to offer a one-time approval.
+    ///
+    /// An ALLOW needs nothing. A DENY is deliberately not offered: an agent
+    /// that misreported its own basket, or one already caught testing the
+    /// fence, is not a thing to wave through with one tap. What is left is the
+    /// refusal a person can overrule by *looking* — which is what the approval
+    /// makes them do.
+    var grantable: Bool { verdict == .escalate || verdict == .clarify }
+
     enum CodingKeys: String, CodingKey {
         case verdict
         case reasonCode = "reason_code"

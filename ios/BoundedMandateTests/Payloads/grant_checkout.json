@@ -1,0 +1,29 @@
+{
+ "grant_id": "grant_Zu7eP9dO9noFSUhC",
+ "per_txn_max_paise": 1500000,
+ "merchants": [
+  "instamart"
+ ],
+ "categories": [
+  "electronics",
+  "fees"
+ ],
+ "delivery_address": "12 Nandidurga Rd, Bengaluru",
+ "every_days": 1,
+ "orders_per_window": 1,
+ "cart_id": "instamart_cart_1",
+ "expires_at": "2026-08-26T11:56:48.143329+00:00",
+ "state": "ready",
+ "merchant": "instamart",
+ "amount_paise": 1500000,
+ "order_id": "order_TUNxpcqCUkcZBL",
+ "key_id": "rzp_test_REDACTED",
+ "payment_id": null,
+ "items": [
+  {
+   "name": "Smartwatch",
+   "price_paise": 1500000,
+   "category": "electronics"
+  }
+ ]
+}

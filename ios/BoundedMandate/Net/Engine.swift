@@ -30,6 +30,21 @@ enum Engine {
         try await post("/api/agent", body: ["text": text, "adversarial": adversarial])
     }
 
+    /// Approve one basket the standing rule refused.
+    ///
+    /// The app sends a cart id and nothing else — no cap, no category, no
+    /// address. Every bound comes back derived from the cart the engine itself
+    /// fetched, so a compromised client can pick *which* basket to put in front
+    /// of the user and cannot touch what approving it would mean.
+    static func grantOneTime(cartID: String) async throws -> GrantResponse {
+        try await post("/api/mandate/one-time", body: ["cart_id": cartID])
+    }
+
+    /// The checkout the server minted, as an absolute URL for Safari.
+    static func url(forPath path: String) -> URL? {
+        URL(string: baseURL.absoluteString + path)
+    }
+
     /// Every list the user keeps, soonest-due first.
     static func readLists() async throws -> [ShoppingList] {
         struct Wrapper: Decodable { let lists: [ShoppingList] }
