@@ -56,6 +56,12 @@ struct CartLine: Codable, Hashable, Sendable, Identifiable {
     let pricePaise: Int
     let category: String
     let url: String
+    /// A picture of the thing, when the merchant has one. **Decoration.**
+    ///
+    /// The mock has no photographs because it has no products, so this is
+    /// absent on the offline path and the row renders exactly as it did before
+    /// — a column of empty placeholders would be worse than no column.
+    let imageURL: String?
     /// The policy's judgement, computed server-side.
     let offScope: Bool
     let unclassified: Bool
@@ -72,8 +78,36 @@ struct CartLine: Codable, Hashable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case name, category, url
         case pricePaise = "price_paise"
+        case imageURL = "image_url"
         case offScope = "off_scope"
         case unclassified
+    }
+
+    init(from decoder: any Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        name = try box.decode(String.self, forKey: .name)
+        category = try box.decode(String.self, forKey: .category)
+        url = try box.decode(String.self, forKey: .url)
+        pricePaise = try box.decode(Int.self, forKey: .pricePaise)
+        offScope = try box.decode(Bool.self, forKey: .offScope)
+        unclassified = try box.decode(Bool.self, forKey: .unclassified)
+        // Blank and absent are the same thing: no picture. Payloads captured
+        // before this field existed still decode.
+        let image = try box.decodeIfPresent(String.self, forKey: .imageURL)
+        imageURL = (image?.isEmpty ?? true) ? nil : image
+    }
+
+    init(
+        name: String, pricePaise: Int, category: String, url: String,
+        imageURL: String? = nil, offScope: Bool = false, unclassified: Bool = false
+    ) {
+        self.name = name
+        self.pricePaise = pricePaise
+        self.category = category
+        self.url = url
+        self.imageURL = imageURL
+        self.offScope = offScope
+        self.unclassified = unclassified
     }
 }
 

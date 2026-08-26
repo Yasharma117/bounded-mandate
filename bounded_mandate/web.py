@@ -177,6 +177,10 @@ def _rendered(decision, *, claimed_total_paise: int, cart_items: int) -> dict:
             "price_paise": item.price_paise,
             "category": item.category,
             "url": f"/m/{cart.merchant}/p/{quote(item.name)}",
+            # Decoration, and empty on the mock — which has no photographs
+            # because it has no products. The card renders nothing rather than
+            # a placeholder when this is blank.
+            "image_url": item.image_url,
             # Why this line is a problem, if it is. Computed here because it is
             # the policy's judgement, not the client's.
             "off_scope": bool(policy and item.category and item.category not in policy.categories),

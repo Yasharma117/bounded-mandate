@@ -28,6 +28,7 @@
 		8FD3457E71F4DB10703ABC65 /* Gallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BF062DF9C63307AEFAC7E5C /* Gallery.swift */; };
 		91914D4C0A12FBCABFFF6CB5 /* ThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 475F8843619C3FBCD0806282 /* ThreadView.swift */; };
 		9D05E8A565CBB7823A87B82A /* DecisionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 309C0A10C6372B326D0D6D3F /* DecisionCard.swift */; };
+		A076D5C01A07E48990CC13E9 /* decision_live.json in Resources */ = {isa = PBXBuildFile; fileRef = FFC7C64DB646CF41394D92D3 /* decision_live.json */; };
 		ADE569289D879E5AE7AF9EE8 /* VoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08994E31838B4504D06AEDCB /* VoiceSession.swift */; };
 		B3CCBE7DE4AF8D06C7DF3D2D /* Surfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FE80D8D802D5B02E2DF3C0 /* Surfaces.swift */; };
 		B89B81EFC730E92C5C6317EA /* turn_deny.json in Resources */ = {isa = PBXBuildFile; fileRef = FBE069DC68F919F6052214CE /* turn_deny.json */; };
@@ -89,6 +90,7 @@
 		E850AA83E9DF20D02B3CD3B9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E9774A61A14E72CF37180810 /* Voice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voice.swift; sourceTree = "<group>"; };
 		FBE069DC68F919F6052214CE /* turn_deny.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = turn_deny.json; sourceTree = "<group>"; };
+		FFC7C64DB646CF41394D92D3 /* decision_live.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = decision_live.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -159,6 +161,7 @@
 			isa = PBXGroup;
 			children = (
 				96063580324C426C48291527 /* addresses.json */,
+				FFC7C64DB646CF41394D92D3 /* decision_live.json */,
 				607154604E21A84A7DDFA83C /* grant_checkout.json */,
 				9FC75673669DB63D1D565AD6 /* grant.json */,
 				69F76D401D3789726BA2990F /* list.json */,
@@ -280,6 +283,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4006B205EFF7D78D15EB4657 /* addresses.json in Resources */,
+				A076D5C01A07E48990CC13E9 /* decision_live.json in Resources */,
 				1ECD29654D72BE57A4CBD93C /* grant.json in Resources */,
 				B996BA93AC5014410769CEA1 /* grant_checkout.json in Resources */,
 				F48BA24A998CD6A92131DC57 /* list.json in Resources */,

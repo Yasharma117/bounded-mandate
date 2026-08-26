@@ -425,6 +425,46 @@ struct CardCopyTests {
         #expect(!decision.grantable)
     }
 
+    // MARK: - product photographs
+    //
+    // `decision_live.json` was captured from a real Instamart cart on
+    // 2026-08-26. The mock has no photographs because it has no products, so
+    // this is the only fixture that can exercise the path at all.
+
+    @Test func aLiveCartLineCarriesItsPhotograph() throws {
+        let decision = try decode(Decision.self, "decision_live")
+        let goods = decision.items.filter { $0.category != "fees" }
+
+        #expect(!goods.isEmpty)
+        #expect(goods.allSatisfy { $0.imageURL?.hasPrefix("https://") == true })
+        // Sized on the merchant's CDN: 648 KB becomes 10.7 KB, measured. A
+        // twelve-line cart at full size would be 7 MB to draw twelve thumbnails.
+        #expect(goods.allSatisfy { $0.imageURL?.contains("w_160,h_160,c_fit") == true })
+    }
+
+    @Test func aBillLineIsNotAThingAndHasNoPhotograph() throws {
+        let decision = try decode(Decision.self, "decision_live")
+        let fees = decision.items.filter { $0.category == "fees" }
+
+        #expect(!fees.isEmpty)
+        // Blank and absent both decode to nil, so the row draws nothing rather
+        // than a placeholder box beside a handling fee.
+        #expect(fees.allSatisfy { $0.imageURL == nil })
+    }
+
+    @Test func aCartCapturedBeforeImagesExistedStillDecodes() throws {
+        let turn = try decode(AgentTurn.self, "turn_escalate")
+        let decision = try #require(turn.decision)
+
+        #expect(!decision.items.isEmpty)
+        #expect(decision.items.allSatisfy { $0.imageURL == nil })
+        // And the flag survives having no picture — which is the property that
+        // matters. A merchant serving no photo must not make an off-scope line
+        // read as ordinary.
+        #expect(decision.flagged.count == 2)
+        #expect(decision.orderedItems.prefix(2).allSatisfy { $0.flagged })
+    }
+
     // MARK: - where things get delivered
 
     @Test func theAddressBookSaysWhereOrdersGo() throws {

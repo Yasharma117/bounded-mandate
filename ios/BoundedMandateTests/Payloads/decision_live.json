@@ -1,0 +1,95 @@
+{
+ "items": [
+  {
+   "name": "Amul Taaza Milky Milk 500 ml",
+   "price_paise": 2800,
+   "category": "groceries",
+   "url": "/m/instamart/p/Amul%20Taaza%20Milky%20Milk%20500%20ml",
+   "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/ciw/2025/12/17/b42b731e-b555-4536-913a-265af70ec9e4_SKS75T1GV1_MN_16122025.png",
+   "off_scope": false,
+   "unclassified": false
+  },
+  {
+   "name": "Britannia Brown Bread 400 g",
+   "price_paise": 6000,
+   "category": "groceries",
+   "url": "/m/instamart/p/Britannia%20Brown%20Bread%20400%20g",
+   "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/ciw/2026/4/14/d3f9f145-543d-4a96-a708-ebbf8fea0f20_mn_bg_removed_AL13_c160a0f2-7ecd-4985-a54b-599503309f20.png",
+   "off_scope": false,
+   "unclassified": false
+  },
+  {
+   "name": "Handling Fee",
+   "price_paise": 800,
+   "category": "fees",
+   "url": "/m/instamart/p/Handling%20Fee",
+   "image_url": "",
+   "off_scope": false,
+   "unclassified": false
+  },
+  {
+   "name": "Small Cart Fee",
+   "price_paise": 2000,
+   "category": "fees",
+   "url": "/m/instamart/p/Small%20Cart%20Fee",
+   "image_url": "",
+   "off_scope": false,
+   "unclassified": false
+  },
+  {
+   "name": "Delivery Partner Fee",
+   "price_paise": 3000,
+   "category": "fees",
+   "url": "/m/instamart/p/Delivery%20Partner%20Fee",
+   "image_url": "",
+   "off_scope": false,
+   "unclassified": false
+  },
+  {
+   "name": "Late Night Fee",
+   "price_paise": 3000,
+   "category": "fees",
+   "url": "/m/instamart/p/Late%20Night%20Fee",
+   "image_url": "",
+   "off_scope": false,
+   "unclassified": false
+  },
+  {
+   "name": "GST and Charges",
+   "price_paise": 1440,
+   "category": "fees",
+   "url": "/m/instamart/p/GST%20and%20Charges",
+   "image_url": "",
+   "off_scope": false,
+   "unclassified": false
+  },
+  {
+   "name": "Rounding",
+   "price_paise": -40,
+   "category": "fees",
+   "url": "/m/instamart/p/Rounding",
+   "image_url": "",
+   "off_scope": false,
+   "unclassified": false
+  }
+ ],
+ "merchant": "instamart",
+ "verdict": "ESCALATE",
+ "reason_code": "frequency.exceeded",
+ "summary": "Sooner than agreed",
+ "reasons": [
+  {
+   "code": "frequency.exceeded",
+   "title": "Sooner than agreed",
+   "detail": "Already 1 order in the last 4 days."
+  }
+ ],
+ "settlement": "Nothing was charged",
+ "cart_id": "swiggy_128cd8cfeb687b20",
+ "delivery_id": "d86lmbjedmej3uqmebcg",
+ "real_total_paise": 19000,
+ "claimed_total_paise": 19000,
+ "idempotency_key": "7fc26629a541ea8f96ac0c438fb98733",
+ "order_id": null,
+ "key_id": null
+}

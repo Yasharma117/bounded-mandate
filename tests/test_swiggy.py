@@ -18,12 +18,14 @@ import pytest
 
 from bounded_mandate import Proposal, Verdict, decide
 from bounded_mandate.categories import categorise, with_fees
-from bounded_mandate.engine import CartItem, Policy
+from bounded_mandate.engine import Cart, CartItem, Policy
 from bounded_mandate.ledger import Ledger
 from bounded_mandate.swiggy import (
     ALLOWED_TOOLS,
+    THUMB,
     SwiggyAdapter,
     SwiggyUnavailable,
+    _thumb,
     cart_id_for,
     to_paise,
 )
@@ -747,3 +749,99 @@ class TestUpdateCartNeedsBothIds:
             ]
         }
         assert SwiggyAdapter(lambda *a, **k: half, address_id="a").search("x") == []
+
+
+class TestProductImages:
+    """Swiggy returns product photography on both endpoints, public and free.
+
+    It is carried as decoration and nothing else, so most of this file is about
+    the things it must *not* touch.
+    """
+
+    def cart(self):
+        return json.loads((PAYLOADS / "swiggy_cart.json").read_text())
+
+    def search(self):
+        return json.loads((PAYLOADS / "swiggy_search.json").read_text())
+
+    def adapter(self, payload):
+        return SwiggyAdapter(lambda tool, **_: payload, address_id="addr_1")
+
+    # --- reading it ---------------------------------------------------------
+
+    def test_a_real_cart_line_carries_its_photograph(self):
+        items = self.adapter(self.cart()).read_cart().cart.items
+        goods = [i for i in items if i.category != "fees"]
+        assert goods and all(i.image_url.startswith("https://") for i in goods)
+
+    def test_bill_lines_are_not_things_and_carry_no_photograph(self):
+        """A handling fee has no picture. Neither does rounding."""
+        items = self.adapter(self.cart()).read_cart().cart.items
+        fees = [i for i in items if i.category == "fees"]
+        assert fees and all(i.image_url == "" for i in fees)
+
+    def test_search_offers_carry_one_too(self):
+        offers = self.adapter(self.search()).search("milk")
+        assert offers and all(o.image_url.startswith("https://") for o in offers)
+
+    # --- sizing it ----------------------------------------------------------
+
+    def test_the_url_is_resized_on_swiggys_cdn(self):
+        """~600 KB per asset. A twelve-line cart would be 7 MB of photographs to
+        render twelve thumbnails."""
+        line = next(i for i in self.adapter(self.cart()).read_cart().cart.items if i.image_url)
+        assert f"/image/upload/{THUMB}/" in line.image_url
+
+    def test_an_unfamiliar_host_is_passed_through_untouched(self):
+        """Degrade to a large image, never to a broken one."""
+        assert _thumb("https://example.com/a.png") == "https://example.com/a.png"
+
+    def test_transforming_twice_does_not_stack(self):
+        once = _thumb("https://m.swiggy.com/image/upload/NI/a.png")
+        assert _thumb(once) == once
+
+    @pytest.mark.parametrize("missing", [None, "", "   ", 17, {}])
+    def test_a_missing_url_is_empty_not_broken(self, missing):
+        assert _thumb(missing) == ""
+
+    # --- the three properties that keep it decoration -----------------------
+
+    def test_a_photograph_does_not_change_what_a_cart_is(self):
+        """`cart_id` is the content address the whole provenance check rests on.
+        A merchant swapping a product shot must not invalidate an idempotency
+        key or make the engine refuse a cart it already knew."""
+        bare = [CartItem("Milk", 5_600, "groceries")]
+        shot = [CartItem("Milk", 5_600, "groceries", image_url="https://x/y.png")]
+        assert cart_id_for(bare, 5_600) == cart_id_for(shot, 5_600)
+
+    def test_no_verdict_is_ever_reached_because_of_a_picture(self, policy, policies, ledger):
+        from tests.conftest import merchant_holding
+
+        def ruling(image):
+            cart = Cart(
+                cart_id=f"c_{bool(image)}",
+                merchant="instamart",
+                items=(CartItem("Milk", 5_600, "groceries", image_url=image),),
+                delivery_address=next(iter(policy.delivery_addresses)),
+            )
+            return decide(
+                Proposal(policy.mandate_id, cart.cart_id, 5_600),
+                policies=policies,
+                adapter=merchant_holding(cart),
+                ledger=ledger,
+                now=NOW,
+            ).reason_code
+
+        assert ruling("") == ruling("https://x/y.png") == "ok.in_policy"
+
+    def test_the_agent_is_never_shown_a_product_image(self):
+        """Merchant-controlled content handed to a model is an injection surface
+        pointed at the one component least able to refuse it. The agent reads
+        names and prices; pictures stop at the card."""
+        import inspect
+
+        from bounded_mandate.agent import BuyerAgent
+
+        for tool in (BuyerAgent._search_catalog, BuyerAgent._create_cart):
+            source = inspect.getsource(tool)
+            assert "image" not in source.lower(), f"{tool.__name__} leaks an image to the model"

@@ -757,6 +757,59 @@ Rounding                                          ₹ −0.40   fees
 ESCALATE  category.unknown+frequency.exceeded
 ```
 
+## Product images
+
+The cards showed no product imagery at all, which is a problem specific to what
+this thing is for: the demo's punchline is a user *spotting* the item they did
+not order, and a wall of text is a poor place to notice a smartwatch among the
+groceries.
+
+Swiggy already returns the photograph and the adapter was parsing straight past
+it — `products[].variations[].imageUrl` on search, `items[].imageUrl` on the
+cart. Public, no auth, and the host is Cloudinary-backed, so a transform segment
+resizes on **their** CDN rather than ours:
+
+```
+.../image/upload/NI_CATALOG/...png                  648,483 bytes
+.../image/upload/w_160,h_160,c_fit/NI_CATALOG/...    10,702 bytes
+```
+
+Measured live. A twelve-line cart at full size would be 7 MB of photographs to
+draw twelve thumbnails. The transform is applied server-side so the app never
+learns the merchant's CDN scheme — the same reason `merchant_allowed` is decided
+server-side rather than in the client.
+
+Generic icon libraries were the alternative and lost on both counts: a 3D icon
+of "milk" is worse than a photograph of the carton being bought, and the one
+considered ([thiings.co](https://www.thiings.co/things), ~10,000 AI-generated
+icons) is free only with attribution for non-commercial use, has no dal, ghee,
+atta or Indian spices, and would have covered maybe two-thirds of even the mock
+catalog.
+
+**The mock has no photographs, because it has no products.** `ProductThumb`
+draws nothing without a URL rather than a placeholder box, so the offline path
+renders exactly as it did before. (This does mean a mock-backed walkthrough has
+no thumbnails; imagery on camera needs `BM_COMMERCE=swiggy`.)
+
+### It is decoration, and the tests keep it that way
+
+`CartItem.image_url` sits on the record Layer 1 reads, which is an invitation to
+start reading it. Three properties are pinned:
+
+- **A photograph does not change what a cart is.** `cart_id_for` hashes
+  `name|price|category`, so a merchant swapping a product shot cannot invalidate
+  an idempotency key or make the engine refuse a cart it already knew.
+- **No verdict is ever reached because of a picture.** The same basket with and
+  without one produces the identical reason code.
+- **The agent is never shown one.** Merchant-controlled content handed to a
+  model is an injection surface aimed at the component least able to refuse it —
+  and this catalog already ships a prompt injection in a product *name*. The
+  agent reads names and prices; pictures stop at the card.
+
+A line is flagged by its text and its badge. The thumbnail sits beside that and
+changes none of it, so a merchant serving a misleading photo — or none at all —
+cannot make an off-scope item read as ordinary.
+
 ## Audit ledger
 
 Append-only JSONL. Every entry carries the SHA-256 of the entry before it, so
@@ -826,8 +879,9 @@ purely Razorpay account configuration.
 **Phase 3 (the one-time purchase) — built.** `POST /api/mandate/one-time` mints
 a second mandate from the basket the engine fetched, `GET /pay` is a real
 Standard Checkout, and paying revokes the grant. Delivery is a user-owned
-choice over the account's own address book, matched by id rather than prose.
-289 Python tests and 33 Swift tests, no network.
+choice over the account's own address book, matched by id rather than prose,
+and cart lines carry the merchant's own product photography. 303 Python tests
+and 36 Swift tests, no network.
 
 Next: an app icon and the recorded walkthrough.
 

@@ -215,6 +215,7 @@ struct DecisionCard: View {
             VStack(spacing: 0) {
                 ForEach(decision.orderedItems) { line in
                     HStack(spacing: 10) {
+                        ProductThumb(url: line.imageURL)
                         Text(line.name)
                             .font(.system(size: 14))
                             .foregroundStyle(line.flagged ? theme.textNormal : theme.textSubtle)

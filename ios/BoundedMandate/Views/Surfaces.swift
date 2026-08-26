@@ -82,3 +82,38 @@ struct ReasonRow: View {
         }
     }
 }
+
+/// A product photograph, sized for a row.
+///
+/// Decoration, and treated as such everywhere it appears. A line is flagged by
+/// its text and its badge; this sits beside that and changes none of it, so a
+/// merchant serving a misleading photo — or none at all — cannot make an
+/// off-scope item read as ordinary.
+///
+/// Renders **nothing** without a URL rather than a placeholder box. The mock has
+/// no photographs because it has no products, and a column of empty squares is
+/// worse than no column.
+struct ProductThumb: View {
+    @Environment(\.theme) private var theme
+    let url: String?
+    var side: CGFloat = 34
+
+    var body: some View {
+        if let url, let parsed = URL(string: url) {
+            AsyncImage(url: parsed) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFit()
+                default:
+                    // Loading and failure look the same on purpose. Neither is
+                    // information the reader needs, and a broken-image glyph
+                    // reads as a fault in the cart rather than in the CDN.
+                    Color.clear
+                }
+            }
+            .frame(width: side, height: side)
+            .background(theme.bgSubtle, in: .rect(cornerRadius: 8, style: .continuous))
+            .accessibilityHidden(true)
+        }
+    }
+}

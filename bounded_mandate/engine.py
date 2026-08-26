@@ -103,6 +103,18 @@ class CartItem:
     name: str
     price_paise: int
     category: str = ""  # "" means the merchant could not classify it -> CLARIFY
+    #: A picture of the thing, if the merchant has one. **Decoration.**
+    #:
+    #: It is on this record because name, price, category and picture arrive
+    #: from the merchant together and travel together. It is not part of what
+    #: this record is *for*: no check reads it, no `Reason` derives from it, it
+    #: is not hashed into the cart id, and the agent never receives it — an
+    #: image is merchant-controlled content, and handing one to a model is an
+    #: injection surface pointed at the thing least able to refuse it.
+    #:
+    #: Three tests hold those properties, because a field on the record Layer 1
+    #: reads is an invitation to start reading it.
+    image_url: str = ""
 
 
 @dataclass(frozen=True)

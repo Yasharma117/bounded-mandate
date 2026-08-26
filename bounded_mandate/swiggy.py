@@ -145,6 +145,8 @@ class Offer:
     price_paise: int
     category: str
     in_stock: bool
+    #: Already thumbnailed — see `_thumb`.
+    image_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -279,6 +281,7 @@ class SwiggyAdapter:
                         # ours, and it fails closed.
                         category=categorise(name),
                         in_stock=bool(variation.get("isInStockAndAvailable", True)),
+                        image_url=_thumb(variation.get("imageUrl")),
                     )
                 )
         return offers
@@ -395,6 +398,7 @@ class SwiggyAdapter:
                     name=name,
                     price_paise=unit * quantity,
                     category=_category_for(name, assigned),
+                    image_url=_thumb(line.get("imageUrl")),
                 )
             )
 
@@ -541,6 +545,34 @@ def _fee_lines(payload: dict) -> list[CartItem]:
             continue  # a free delivery is not a line worth showing
         lines.append(CartItem(name=label, price_paise=charge, category=FEES_CATEGORY))
     return lines
+
+
+#: Wide enough for a 44pt row at 3x, and nothing beyond that. The original
+#: assets are ~600 KB each; a twelve-line cart would be 7 MB of photographs to
+#: render twelve thumbnails.
+THUMB = "w_160,h_160,c_fit"
+_UPLOAD = "/image/upload/"
+
+
+def _thumb(url: object) -> str:
+    """A product photo, sized for a card.
+
+    Swiggy's media host is Cloudinary-backed, so a transform segment in the path
+    resizes on their CDN rather than ours — `w_160,h_160,c_fit` turns 594 KB
+    into about 10 KB, measured.
+
+    Done here rather than in the app so the client never learns the merchant's
+    CDN scheme, the same reason `merchant_allowed` is computed server-side. A
+    URL that does not carry the expected segment is passed through untouched: an
+    unfamiliar host should degrade to a large image, never to a broken one.
+    """
+    if not isinstance(url, str) or not url.strip():
+        return ""
+    url = url.strip()
+    if _UPLOAD not in url or THUMB in url:
+        return url
+    head, _, tail = url.partition(_UPLOAD)
+    return f"{head}{_UPLOAD}{THUMB}/{tail}"
 
 
 def _item_total_from(payload: dict) -> int | None:
