@@ -121,10 +121,8 @@ struct ThreadView: View {
     @State private var thread = Thread()
     @State private var draft = ""
     @FocusState private var writing: Bool
-    // DEV: -BMOpenList YES opens straight to the list.
-    @State private var showingList = UserDefaults.standard.bool(forKey: "BMOpenList")
-    @State private var showingAddress = UserDefaults.standard.bool(forKey: "BMOpenAddress")
-    // DEV: -BMOpenVoice YES starts in voice mode.
+    @State private var showingList = false
+    @State private var showingAddress = false
     @State private var voice: VoiceSession?
     @Namespace private var glass
     /// One bump per state change, which is what the ripple listens to.
@@ -196,14 +194,6 @@ struct ThreadView: View {
             // One ring per hand-over: you stopped, it is thinking, it is
             // speaking. Voice has no cursor, so the screen has to say so.
             .onChange(of: voice?.phase) { pulse += 1 }
-            // DEV: -BMAsk "..." sends one message on launch, so a whole turn
-            // can be screenshotted without a keyboard.
-            .task {
-                if UserDefaults.standard.bool(forKey: "BMOpenVoice") { startTalking() }
-                if let opening = UserDefaults.standard.string(forKey: "BMAsk") {
-                    await thread.send(opening)
-                }
-            }
             // `safeAreaBar` paints its own glass, which sat as a translucent
             // slab behind the orb. The composer already carries its own glass,
             // so it takes the plain inset and measures itself instead.

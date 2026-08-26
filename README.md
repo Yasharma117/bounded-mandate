@@ -429,9 +429,11 @@ after an agent run reports an escalation.
 
 ### Cards
 
-Every card was built against a dev gallery — `Gallery.swift`, reachable with
-`-BMGallery YES` — because iterating design against the real thread costs a
-six-second model round-trip and a ledger reset per state.
+Every card was built against a dev gallery — every state on one scroll —
+because iterating design against the real thread costs a six-second model
+round-trip and a ledger reset per state. It was scaffolding and it has been
+removed: the shipping build has one entry point, no launch flags that change
+what the app is, and no screen a user cannot reach.
 
 | Card | States | What it answers |
 |---|---|---|

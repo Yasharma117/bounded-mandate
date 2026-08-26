@@ -25,7 +25,6 @@
 		6FA94D52184FABEF368C93F3 /* offers.json in Resources */ = {isa = PBXBuildFile; fileRef = 43F2DF620B35C624AAC1C692 /* offers.json */; };
 		6FAC6DEBA73B5518D401A4E7 /* PayloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF8722A4C7F67E1C3AF706A /* PayloadTests.swift */; };
 		86FD83919307892288A71E14 /* AddressSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 278C11735D563466BFE3313F /* AddressSheet.swift */; };
-		8FD3457E71F4DB10703ABC65 /* Gallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BF062DF9C63307AEFAC7E5C /* Gallery.swift */; };
 		91914D4C0A12FBCABFFF6CB5 /* ThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 475F8843619C3FBCD0806282 /* ThreadView.swift */; };
 		9D05E8A565CBB7823A87B82A /* DecisionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 309C0A10C6372B326D0D6D3F /* DecisionCard.swift */; };
 		A076D5C01A07E48990CC13E9 /* decision_live.json in Resources */ = {isa = PBXBuildFile; fileRef = FFC7C64DB646CF41394D92D3 /* decision_live.json */; };
@@ -75,7 +74,6 @@
 		65F3DEBE3C2F147F07F33CE0 /* BoundedMandateTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BoundedMandateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		69F76D401D3789726BA2990F /* list.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = list.json; sourceTree = "<group>"; };
 		6C88F6845192AEB050232DC9 /* Tokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tokens.swift; sourceTree = "<group>"; };
-		8BF062DF9C63307AEFAC7E5C /* Gallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gallery.swift; sourceTree = "<group>"; };
 		96063580324C426C48291527 /* addresses.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = addresses.json; sourceTree = "<group>"; };
 		9E5DD17B91B9DC009B8D7D2C /* Basket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Basket.swift; sourceTree = "<group>"; };
 		9FC75673669DB63D1D565AD6 /* grant.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = grant.json; sourceTree = "<group>"; };
@@ -114,7 +112,6 @@
 				1F3FB64D32E47048DB096422 /* Backdrop.swift */,
 				C505FE655A597E914113A48C /* Bubble.swift */,
 				309C0A10C6372B326D0D6D3F /* DecisionCard.swift */,
-				8BF062DF9C63307AEFAC7E5C /* Gallery.swift */,
 				5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */,
 				B134C0D0247EF8BD2C49D1E9 /* MandateCard.swift */,
 				1EA33E9B6CFE9D623F014033 /* OffersCard.swift */,
@@ -312,7 +309,6 @@
 				9D05E8A565CBB7823A87B82A /* DecisionCard.swift in Sources */,
 				D8F5CF89C17378CD0E7BE592 /* DeliveryAddress.swift in Sources */,
 				2DB72B2A89D6F4EDC5633695 /* Engine.swift in Sources */,
-				8FD3457E71F4DB10703ABC65 /* Gallery.swift in Sources */,
 				3EAC767A3A0BC126EDD8F50A /* Grant.swift in Sources */,
 				22254A44218ED4D318B4DCD6 /* ListSheet.swift in Sources */,
 				2EAA76FA814C1B7745FC0E41 /* MandateCard.swift in Sources */,
