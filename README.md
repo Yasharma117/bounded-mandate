@@ -32,6 +32,47 @@ It is also free to lie: `request_charge` takes the total the agent *claims*, and
 the engine fetches the real cart to compare. A guard you cannot demonstrate
 failing is a guard nobody should believe.
 
+### It drafts a list; you approve it
+
+Asked to set up a recurring basket, it used to answer: *"I don't have a tool to
+modify your shopping list… you would need to add these items yourself."* True,
+and useless.
+
+The absence of a write tool is a real security property — an agent that could
+redefine "my usual groceries" could then order the new definition entirely
+within policy, an escalation that never trips a bound — so the answer is not to
+hand it one. It is the arrangement the money side already has: **it proposes,
+you decide.**
+
+`propose_list` writes a list out. Nothing is stored, scheduled or ordered
+against until you confirm it, and confirming is an ordinary `POST /api/lists`
+that no tool reaches. The guard used to be "no tool has *list* in its name",
+which is a proxy for the property rather than the property; it is behavioural
+now — drafting leaves `LISTS` byte-identical, and a test runs it to check.
+
+Spoken once, in one turn:
+
+```
+you  : recurring basket every seven days — six Epigamia blueberry yogurt,
+       four Yoga Bar protein bars, one chunky Kit Kat, three blue Lays
+draft: "Weekly snack basket" · every 7 days
+         Epigamia blueberry yogurt x6        not stocked
+         Yoga Bar protein bars x4            not stocked
+         chunky Kit Kat x1                   not stocked
+         blue Lays twenty rupees packets x3  not stocked
+```
+
+Quantities land in the name, which is how the catalog already spells them
+("Toned milk 1L x2"). Every line is checked against the shop the rule allows and
+marked, because a list of things nobody stocks escalates the first time it runs
+and this is a better place to learn that than three days later.
+
+**Storing one is no longer refused for that.** Both list routes used to 400 on
+an unstocked name, which was the mock leaking into the user's own document —
+refusing "Epigamia blueberry yogurt" because our catalog is seventeen items
+long. It is reported on every row and enforced nowhere; the engine still rules
+on the cart that actually gets built.
+
 ### In policy is not the same as wanted
 
 Found on camera: saying **"Hey hello"** in voice mode made the agent read the
@@ -1129,7 +1170,7 @@ a second mandate from the basket the engine fetched, `GET /pay` is a real
 Standard Checkout, and paying revokes the grant. Delivery is a user-owned
 choice over the account's own address book, matched by id rather than prose,
 and every line the user reads carries the merchant's own product photography.
-347 Python tests and 49 Swift tests, no network.
+351 Python tests and 49 Swift tests, no network.
 
 **Phase 4 (the home screen) — built.** Eight states, each a real engine outcome
 reachable through ordinary actions rather than a demo switch.
