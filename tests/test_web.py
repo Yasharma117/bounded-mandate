@@ -683,3 +683,47 @@ def test_a_list_edit_is_not_validated_against_a_live_catalog(client, monkeypatch
 
     monkeypatch.setattr(web, "is_live", lambda: True)
     assert web._unstocked(["Ferrari"]) == []
+
+
+# --- one product, and what else would do --------------------------------------
+
+
+def test_a_product_carries_everything_needed_to_choose(client):
+    out = client.get("/api/product", params={"name": "Aashirvaad atta 5kg"}).json()
+
+    assert out["product"]["price_paise"] == 27_500
+    assert out["product"]["image_url"].startswith("https://")
+    assert out["product"]["merchant_allowed"] and out["product"]["category_allowed"]
+
+
+def test_the_alternatives_are_the_same_thing_not_the_same_aisle(client):
+    """Topping up from the category offered curd as an alternative to atta,
+    which is not an alternative — it is noise, on the one screen somebody
+    opened in order to choose."""
+    out = client.get("/api/product", params={"name": "Aashirvaad atta 5kg"}).json()
+
+    assert out["alternatives"], "no alternatives at all"
+    assert all(a["name"] == "Aashirvaad atta 5kg" for a in out["alternatives"])
+    assert {a["merchant"] for a in out["alternatives"]} == {"blinkit", "zepto"}
+
+
+def test_the_cheapest_alternative_is_the_one_the_rule_refuses(client):
+    """The scene the mock exists for. Cheapest and allowed are different rows."""
+    out = client.get("/api/product", params={"name": "Aashirvaad atta 5kg"}).json()
+    cheapest = min(out["alternatives"], key=lambda a: a["price_paise"])
+
+    assert cheapest["price_paise"] < out["product"]["price_paise"]
+    assert not cheapest["merchant_allowed"]
+
+
+def test_a_widened_name_still_finds_the_product(client):
+    """`Eggs (12)` used to widen to `eggs (12)`, which finds only itself."""
+    from bounded_mandate.web import _search_term
+
+    assert _search_term("Eggs (12)") == "eggs"
+    assert _search_term("Toned milk 1L x2") == "toned milk"
+    assert _search_term("Cow ghee 500ml") == "cow ghee"
+
+
+def test_an_unstocked_product_is_a_404(client):
+    assert client.get("/api/product", params={"name": "Ferrari"}).status_code == 404

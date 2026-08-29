@@ -16,6 +16,7 @@ struct StateCard: View {
     let home: Home
     var onAction: (HomeAction) -> Void
     var onDismiss: () -> Void
+    var onOpen: ((CartLine) -> Void)?
 
     private var tint: Color { home.tint(theme) }
 
@@ -134,6 +135,7 @@ struct StateCard: View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 12) {
                 ForEach(goods) { line in
+                    Button { onOpen?(line) } label: {
                     VStack(alignment: .leading, spacing: 6) {
                         ZStack(alignment: .topTrailing) {
                             ProductThumb(url: line.imageURL, side: 52)
@@ -160,6 +162,10 @@ struct StateCard: View {
                             .foregroundStyle(line.flagged ? tint : theme.textSubtle)
                     }
                     .frame(width: 52)
+                    .contentShape(.rect)
+                    }
+                    .buttonStyle(.pressable)
+                    .disabled(onOpen == nil)
                 }
             }
             .padding(.horizontal, 18)

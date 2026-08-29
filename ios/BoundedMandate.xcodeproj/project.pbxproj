@@ -12,6 +12,7 @@
 		1014689A9ED39A18BCF9CD06 /* Voice.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9774A61A14E72CF37180810 /* Voice.swift */; };
 		1A4845C7B3965BFAF1B1BB05 /* Decision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 461AAC29A571034CD100B1F6 /* Decision.swift */; };
 		1ECD29654D72BE57A4CBD93C /* grant.json in Resources */ = {isa = PBXBuildFile; fileRef = 9FC75673669DB63D1D565AD6 /* grant.json */; };
+		1FB1A51BAA4441A9689D973C /* ProductSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDB1665E8379391B01B4C668 /* ProductSheet.swift */; };
 		211C722E34BF5CD5BF6BCDE8 /* Bubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = C505FE655A597E914113A48C /* Bubble.swift */; };
 		22254A44218ED4D318B4DCD6 /* ListSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */; };
 		2391E97D9D4D6B70792CB48E /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C748AAD1C1085254E1F426F7 /* HomeView.swift */; };
@@ -47,8 +48,10 @@
 		D400D29C8D8E0A2DF378D6FB /* Tokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C88F6845192AEB050232DC9 /* Tokens.swift */; };
 		D8F5CF89C17378CD0E7BE592 /* DeliveryAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C858017986FE5EA163470CF /* DeliveryAddress.swift */; };
 		E1F4E838FDCC3F49630592FB /* OffersCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EA33E9B6CFE9D623F014033 /* OffersCard.swift */; };
+		E40BEC420A6AE7F0AC9A3D64 /* product.json in Resources */ = {isa = PBXBuildFile; fileRef = 604D1D9736A19B511A0F3FF3 /* product.json */; };
 		E8E86BB782DE0D8604751804 /* AudioIO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA6E6C521E21C14C2113E65 /* AudioIO.swift */; };
 		ED50CCCD43F56EF4482B05A2 /* BoundedMandateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483AA4A36F0EBA528FDE34FD /* BoundedMandateApp.swift */; };
+		EFAA88FB0D1D1A3B856DC282 /* Product.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4FFE7DC44692541EF8FAFE /* Product.swift */; };
 		F155755629AFC43B5F5C6386 /* home_grant_live.json in Resources */ = {isa = PBXBuildFile; fileRef = 5A0CB6B22ECC7C92AAF31047 /* home_grant_live.json */; };
 		F48BA24A998CD6A92131DC57 /* list.json in Resources */ = {isa = PBXBuildFile; fileRef = 69F76D401D3789726BA2990F /* list.json */; };
 /* End PBXBuildFile section */
@@ -87,6 +90,7 @@
 		547E104CAEC12ADCF7194C89 /* offers_category_blocked.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = offers_category_blocked.json; sourceTree = "<group>"; };
 		5A0CB6B22ECC7C92AAF31047 /* home_grant_live.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = home_grant_live.json; sourceTree = "<group>"; };
 		5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListSheet.swift; sourceTree = "<group>"; };
+		604D1D9736A19B511A0F3FF3 /* product.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = product.json; sourceTree = "<group>"; };
 		607154604E21A84A7DDFA83C /* grant_checkout.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = grant_checkout.json; sourceTree = "<group>"; };
 		65F3DEBE3C2F147F07F33CE0 /* BoundedMandateTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BoundedMandateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		69F76D401D3789726BA2990F /* list.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = list.json; sourceTree = "<group>"; };
@@ -97,6 +101,7 @@
 		96063580324C426C48291527 /* addresses.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = addresses.json; sourceTree = "<group>"; };
 		9E5DD17B91B9DC009B8D7D2C /* Basket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Basket.swift; sourceTree = "<group>"; };
 		9FC75673669DB63D1D565AD6 /* grant.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = grant.json; sourceTree = "<group>"; };
+		AB4FFE7DC44692541EF8FAFE /* Product.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Product.swift; sourceTree = "<group>"; };
 		B134C0D0247EF8BD2C49D1E9 /* MandateCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MandateCard.swift; sourceTree = "<group>"; };
 		B1804A7D5CDED7A536CCFDDC /* Grant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Grant.swift; sourceTree = "<group>"; };
 		B62812298D584BB58C041C20 /* ShoppingListCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShoppingListCard.swift; sourceTree = "<group>"; };
@@ -109,6 +114,7 @@
 		E850AA83E9DF20D02B3CD3B9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E9774A61A14E72CF37180810 /* Voice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voice.swift; sourceTree = "<group>"; };
 		ECD4E0E4BD022186DCF737C0 /* home_clarify.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = home_clarify.json; sourceTree = "<group>"; };
+		EDB1665E8379391B01B4C668 /* ProductSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductSheet.swift; sourceTree = "<group>"; };
 		FBE069DC68F919F6052214CE /* turn_deny.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = turn_deny.json; sourceTree = "<group>"; };
 		FFC7C64DB646CF41394D92D3 /* decision_live.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = decision_live.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -138,6 +144,7 @@
 				5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */,
 				B134C0D0247EF8BD2C49D1E9 /* MandateCard.swift */,
 				1EA33E9B6CFE9D623F014033 /* OffersCard.swift */,
+				EDB1665E8379391B01B4C668 /* ProductSheet.swift */,
 				203B007F07FFB845384BD2D8 /* Ripple.swift */,
 				B62812298D584BB58C041C20 /* ShoppingListCard.swift */,
 				827AE823252883C5C1DA44E3 /* StateCard.swift */,
@@ -164,6 +171,7 @@
 				3C858017986FE5EA163470CF /* DeliveryAddress.swift */,
 				B1804A7D5CDED7A536CCFDDC /* Grant.swift */,
 				7ECAB4BEC7219BD2FE7B6DF8 /* Home.swift */,
+				AB4FFE7DC44692541EF8FAFE /* Product.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -197,6 +205,7 @@
 				69F76D401D3789726BA2990F /* list.json */,
 				547E104CAEC12ADCF7194C89 /* offers_category_blocked.json */,
 				43F2DF620B35C624AAC1C692 /* offers.json */,
+				604D1D9736A19B511A0F3FF3 /* product.json */,
 				FBE069DC68F919F6052214CE /* turn_deny.json */,
 				C9736444AF6DBCB412CF4E12 /* turn_escalate.json */,
 				4B4772911BE45B54FA37B34F /* turn_prices.json */,
@@ -327,6 +336,7 @@
 				F48BA24A998CD6A92131DC57 /* list.json in Resources */,
 				6FA94D52184FABEF368C93F3 /* offers.json in Resources */,
 				61E773A70F15F85EB79EB42F /* offers_category_blocked.json in Resources */,
+				E40BEC420A6AE7F0AC9A3D64 /* product.json in Resources */,
 				B89B81EFC730E92C5C6317EA /* turn_deny.json in Resources */,
 				38847C894E60C2D51CDA457C /* turn_escalate.json in Resources */,
 				C9175BE14C157761031F15B0 /* turn_prices.json in Resources */,
@@ -357,6 +367,8 @@
 				2EAA76FA814C1B7745FC0E41 /* MandateCard.swift in Sources */,
 				079ADA24D717E9A4B7C0DE1A /* Motion.swift in Sources */,
 				E1F4E838FDCC3F49630592FB /* OffersCard.swift in Sources */,
+				EFAA88FB0D1D1A3B856DC282 /* Product.swift in Sources */,
+				1FB1A51BAA4441A9689D973C /* ProductSheet.swift in Sources */,
 				48F5D8818E08FBE4ACD83A38 /* Ripple.swift in Sources */,
 				D1E861CE4594428BD4513065 /* ShoppingListCard.swift in Sources */,
 				2743727C23114CD43BA2C867 /* StateCard.swift in Sources */,

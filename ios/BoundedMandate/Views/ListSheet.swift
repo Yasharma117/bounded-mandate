@@ -29,6 +29,22 @@ final class ListStore {
         await write(list, items: list.items.filter { $0.name != item.name }.map(\.name))
     }
 
+    /// Replace one line with another, in place.
+    ///
+    /// A user action on a user-owned document. The agent has no tool that
+    /// reaches this — which is the whole reason it is safe to offer as one tap.
+    func swap(_ old: String, for new: String, in list: ShoppingList) async {
+        guard old != new else { return }
+        var names = list.items.map(\.name)
+        guard let at = names.firstIndex(of: old) else { return }
+        if let already = names.firstIndex(of: new), already != at {
+            names.remove(at: at)  // it is already on the list; do not duplicate it
+        } else {
+            names[at] = new
+        }
+        await write(list, items: names)
+    }
+
     func add(_ name: String, to list: ShoppingList) async {
         guard !list.items.contains(where: { $0.name == name }) else { return }
         await write(list, items: list.items.map(\.name) + [name])
@@ -95,6 +111,15 @@ struct ListSheet: View {
     @State private var store = ListStore()
     @State private var addingTo: ShoppingList?
     @State private var creating = false
+    @State private var opened: Opened?
+
+    /// Which line is being looked at, and which list it belongs to — the second
+    /// half is what makes swapping possible.
+    struct Opened: Identifiable {
+        let item: ListItem
+        let list: ShoppingList
+        var id: String { list.listID + item.name }
+    }
 
     var body: some View {
         NavigationStack {
@@ -112,7 +137,8 @@ struct ListSheet: View {
                                 onRemove: { item in
                                     Task { await store.remove(item, from: list) }
                                 },
-                                onAdd: { addingTo = list }
+                                onAdd: { addingTo = list },
+                                onOpen: { item in opened = Opened(item: item, list: list) }
                             )
                         }
                     }
@@ -136,6 +162,11 @@ struct ListSheet: View {
                 .padding(16)
             }
             .background(Backdrop())
+            .sheet(item: $opened) { open in
+                ProductSheet(name: open.item.name, merchant: open.list.merchant) { chosen in
+                    Task { await store.swap(open.item.name, for: chosen, in: open.list) }
+                }
+            }
             .navigationTitle("Shopping lists")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

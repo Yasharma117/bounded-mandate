@@ -1,0 +1,35 @@
+{
+ "product": {
+  "merchant": "instamart",
+  "name": "Aashirvaad atta 5kg",
+  "price_paise": 27500,
+  "category": "groceries",
+  "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/3/9/805a02b1-e08b-4d4b-aa8f-ab05cabb1e37_1780_1.png",
+  "url": "/m/instamart/p/Aashirvaad%20atta%205kg",
+  "merchant_allowed": true,
+  "category_allowed": true
+ },
+ "alternatives": [
+  {
+   "merchant": "blinkit",
+   "name": "Aashirvaad atta 5kg",
+   "price_paise": 25900,
+   "category": "groceries",
+   "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/3/9/805a02b1-e08b-4d4b-aa8f-ab05cabb1e37_1780_1.png",
+   "url": "/m/blinkit/p/Aashirvaad%20atta%205kg",
+   "merchant_allowed": false,
+   "category_allowed": true
+  },
+  {
+   "merchant": "zepto",
+   "name": "Aashirvaad atta 5kg",
+   "price_paise": 26800,
+   "category": "groceries",
+   "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/3/9/805a02b1-e08b-4d4b-aa8f-ab05cabb1e37_1780_1.png",
+   "url": "/m/zepto/p/Aashirvaad%20atta%205kg",
+   "merchant_allowed": false,
+   "category_allowed": true
+  }
+ ],
+ "comparable": true
+}

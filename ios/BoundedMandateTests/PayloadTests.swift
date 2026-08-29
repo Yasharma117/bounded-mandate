@@ -425,6 +425,41 @@ struct CardCopyTests {
         #expect(!decision.grantable)
     }
 
+    // MARK: - one product, and what else would do
+
+    @Test func aProductCarriesEverythingNeededToChoose() throws {
+        let detail = try decode(ProductDetail.self, "product")
+
+        #expect(detail.product.name == "Aashirvaad atta 5kg")
+        #expect(detail.product.imageURL?.hasPrefix("https://") == true)
+        #expect(detail.product.buyable)
+        #expect(detail.product.blockedReason == nil)
+        #expect(!detail.alternatives.isEmpty)
+    }
+
+    @Test func theCheapestAlternativeIsOftenTheOneYourRuleRefuses() throws {
+        """
+        The scene the mock exists for: Blinkit undercuts Instamart on the
+        staples, so the cheapest row and the allowed row are different rows.
+        Collapsing shop and category into one flag would name the wrong reason.
+        """
+        let detail = try decode(ProductDetail.self, "product")
+        let cheapest = try #require(detail.alternatives.min { $0.pricePaise < $1.pricePaise })
+
+        #expect(cheapest.pricePaise < detail.product.pricePaise)
+        #expect(!cheapest.buyable)
+        #expect(cheapest.blockedReason?.contains("not on your list") == true)
+    }
+
+    @Test func everyAlternativeShowsAPictureAndItsOwnVerdict() throws {
+        let detail = try decode(ProductDetail.self, "product")
+
+        #expect(detail.alternatives.allSatisfy { $0.imageURL?.hasPrefix("https://") == true })
+        // Two answers, never one — a shop can be allowed while what it sells
+        // is not, and this sheet exists to help somebody choose.
+        #expect(detail.alternatives.allSatisfy { $0.buyable == ($0.merchantAllowed && $0.categoryAllowed) })
+    }
+
     // MARK: - the home screen's states
     //
     // Eight captures from a running engine, one per state. What is worth

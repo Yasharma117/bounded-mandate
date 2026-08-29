@@ -44,6 +44,7 @@ struct HomeView: View {
     @State private var showingAddress = false
     @State private var showingThread = false
     @State private var openVoice = false
+    @State private var looking: CartLine?
 
     var body: some View {
         NavigationStack {
@@ -56,7 +57,8 @@ struct HomeView: View {
                         StateCard(
                             home: home,
                             onAction: { act in take(act, home) },
-                            onDismiss: { Task { await store.dismiss() } }
+                            onDismiss: { Task { await store.dismiss() } },
+                            onOpen: { line in looking = line }
                         )
                         .arrives(reduceMotion)
                         .id(home.state + home.headline)
@@ -89,6 +91,11 @@ struct HomeView: View {
                 }
             }
             .sheet(isPresented: $showingList) { ListSheet() }
+            // No swap offered from here: this is a basket that has already been
+            // decided on, not a list the user is composing.
+            .sheet(item: $looking) { line in
+                ProductSheet(name: line.name, merchant: store.home?.rule.merchants.first ?? "instamart")
+            }
             .sheet(isPresented: $showingAddress) { AddressSheet() }
             .fullScreenCover(isPresented: $showingThread) {
                 ThreadView(startInVoice: openVoice)

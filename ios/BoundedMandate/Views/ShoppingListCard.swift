@@ -16,6 +16,9 @@ struct ShoppingListCard: View {
     var editable = true
     var onRemove: ((ListItem) -> Void)?
     var onAdd: (() -> Void)?
+    /// Tapping a line. Without it the row falls back to opening the product
+    /// page in a browser, which answers "what is this" and nothing else.
+    var onOpen: ((ListItem) -> Void)?
 
     /// A twelve-item list is taller than the screen, and a card that fills the
     /// thread stops being punctuation and becomes a page. Collapsed by default;
@@ -111,7 +114,9 @@ struct ShoppingListCard: View {
                     Divider().overlay(theme.borderSubtle.opacity(0.5)).padding(.leading, 18)
                 }
                 ItemRow(item: item, editable: editable, onRemove: onRemove) {
-                    if let url = URL(string: Engine.baseURL.absoluteString + item.url) {
+                    if let onOpen {
+                        onOpen(item)
+                    } else if let url = URL(string: Engine.baseURL.absoluteString + item.url) {
                         openURL(url)
                     }
                 }

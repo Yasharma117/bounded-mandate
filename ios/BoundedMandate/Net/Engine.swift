@@ -60,6 +60,16 @@ enum Engine {
         let _: Ran = try await send("/api/lists/run-due", method: "POST")
     }
 
+    /// One product in full, and the alternatives to it.
+    static func product(_ name: String, merchant: String) async throws -> ProductDetail {
+        let encode = { (s: String) in
+            s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? s
+        }
+        return try await send(
+            "/api/product?name=\(encode(name))&merchant=\(encode(merchant))", method: "GET"
+        )
+    }
+
     /// Where do I stand. One call, because *which* state the engine is in is
     /// the engine's judgement — the app renders it and does not decide it.
     static func readHome() async throws -> Home {

@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import secrets
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -739,6 +740,90 @@ def _offer_rows(query: str) -> list[dict]:
             }
         )
     return rows
+
+
+# --- one product, and what else would do -------------------------------------
+#
+# A line on a list is a name and a price, which is enough to decide *whether*
+# but not enough to decide *which*. Tapping it should answer the second
+# question — and the answer has to carry the policy's verdict with it, because
+# an alternative the rule does not cover is a thing the user should learn now
+# rather than after an escalation.
+
+#: Words that describe a pack rather than a product. Dropped when widening a
+#: name into a search, or "Toned milk 1L x2" only ever finds itself.
+_PACK_WORDS = frozenset({"kg", "g", "gm", "ml", "l", "ltr", "litre", "pack", "x", "pc", "pcs"})
+
+
+def _search_term(name: str) -> str:
+    """A product name, widened into something that finds its neighbours.
+
+    "Aashirvaad atta 5kg" -> "aashirvaad atta". Two words, because one is too
+    broad ("amul" is half the dairy aisle) and three is usually the exact
+    product again.
+    """
+    words = []
+    for raw in re.split(r"[^a-z0-9]+", name.casefold()):
+        word = raw.strip("0123456789.")
+        if raw and word and word not in _PACK_WORDS:
+            words.append(word)
+    return " ".join(words[:2])
+
+
+@app.get("/api/product")
+def product_detail(name: str, merchant: str = MERCHANT_NAME) -> dict:
+    """One product in full, and the alternatives to it.
+
+    Every row — the product and each alternative — carries `merchant_allowed`
+    and `category_allowed` separately, the same as the offers card. A shop can
+    be allowed while the thing it sells is not, and collapsing the two would
+    make the sheet name the wrong reason for the one thing it exists to help
+    someone choose.
+    """
+    item = _product(merchant, name)
+    if item is None:
+        raise HTTPException(404, "not stocked")
+    policy = POLICIES["mdt_demo"]
+
+    def row(seller: str, thing) -> dict:
+        return {
+            "merchant": seller,
+            "name": thing.name,
+            "price_paise": thing.price_paise,
+            "category": thing.category,
+            "image_url": thing.image_url,
+            "url": f"/m/{seller}/p/{quote(thing.name)}",
+            "merchant_allowed": seller in policy.merchants,
+            "category_allowed": thing.category in policy.categories,
+        }
+
+    try:
+        found = MARKETPLACE.search(_search_term(name))
+    except Exception:
+        found = []
+    alternatives = []
+    for offer in found:
+        seller, thing = _offer_parts(offer)
+        if thing.name == name and seller == merchant:
+            continue  # the product itself is not an alternative to itself
+        alternatives.append(row(seller, thing))
+
+    # Deliberately not topped up from the same category. Doing that offered curd
+    # as an alternative to atta, which is not an alternative — it is noise, on
+    # the one screen somebody opened in order to choose.
+    #
+    # What is left is the honest answer each backend can give. On the mock that
+    # is the same product at the other shops, which is what the mock exists to
+    # show: Blinkit undercuts Instamart on the staples, so the cheapest row and
+    # the allowed row are different rows. On live it is Instamart's own variants
+    # and similar products.
+    return {
+        "product": row(merchant, item),
+        # Cheapest first, but the policy's answer is on every row so "cheapest"
+        # and "allowed" can visibly disagree — which they are meant to.
+        "alternatives": sorted(alternatives, key=lambda a: a["price_paise"])[:12],
+        "comparable": not is_live(),
+    }
 
 
 @app.get("/api/catalog")
