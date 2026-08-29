@@ -67,17 +67,14 @@ struct HomeView: View {
                     }
 
                     if let problem = store.problem {
-                        Text(problem)
-                            .font(.system(size: 13))
-                            .foregroundStyle(theme.negative)
-                            .textSelection(.enabled)
+                        disconnected(problem)
                     }
                 }
                 .padding(16)
                 .animation(Motion.respectful(Motion.move(), reduced: reduceMotion), value: store.home?.state)
             }
             .scrollEdgeEffectStyle(.hard, for: .top)
-            .background(Backdrop())
+            .background(backdrop)
             .navigationTitle("Bounded Mandate")
             // Inline, not large. The rule header directly below is the page's
             // real header, and a big title above it says the app's name twice
@@ -104,6 +101,49 @@ struct HomeView: View {
             .onChange(of: showingList) { if !showingList { Task { await store.load() } } }
             .onChange(of: showingAddress) { if !showingAddress { Task { await store.load() } } }
         }
+    }
+
+    /// As a plain `.background` this is sized to the scroll view's *content*
+    /// area, which is inset about 34pt on each side — so the page shows through
+    /// down both edges as a lighter band the width of the content. Overshooting
+    /// covers it; `ignoresSafeArea` alone does not, because the inset is not
+    /// safe area. The same trap `ThreadView` documents, walked into again by
+    /// reaching for `Backdrop()` bare.
+    private var backdrop: some View {
+        Backdrop()
+            .padding(.horizontal, -80)
+            .ignoresSafeArea()
+    }
+
+    /// The engine is not answering.
+    ///
+    /// Worth a real screen rather than a red line: this app holds no policy and
+    /// no keys, so with the engine down there is nothing it can show and
+    /// nothing it can do — and on a demo machine the likeliest cause is simply
+    /// that the server is not running yet.
+    private func disconnected(_ problem: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "bolt.horizontal.circle")
+                .font(.system(size: 30))
+                .foregroundStyle(theme.textMuted)
+            Text("Can't reach the engine.")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(theme.textNormal)
+            Text(Engine.baseURL.absoluteString)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(theme.textMuted)
+                .textSelection(.enabled)
+            Text(problem)
+                .font(.system(size: 13))
+                .foregroundStyle(theme.textMuted)
+                .multilineTextAlignment(.center)
+            Button("Try again") { Task { await store.load() } }
+                .buttonStyle(.glass)
+                .tint(theme.primary)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
     }
 
     // MARK: - the rule, which finally has a screen
