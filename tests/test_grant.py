@@ -260,15 +260,52 @@ def test_the_same_line_still_clarifies_under_a_standing_rule(policy, ledger):
 
 
 def test_a_basket_that_moved_after_approval_hands_out_no_checkout(client, monkeypatch):
-    """Cart ids are content-addressed, so a changed basket answers to a different
-    id. The order on Razorpay is then for a total nobody has read since."""
+    """Cart ids are content-addressed on the live path, so a changed basket
+    answers to a different id. The order on Razorpay is then for a total nobody
+    has read since, and the checkout stops."""
     grant_id = grant(client, refused(client)["cart_id"]).json()["grant"]["grant_id"]
+    monkeypatch.setattr(web, "is_live", lambda: True)
     monkeypatch.setattr(web.MARKETPLACE, "fetch_cart", lambda _: None)
 
     out = client.get(f"/api/grant/{grant_id}").json()
 
     assert out["state"] == "stale"
     assert out["order_id"] is None and out["key_id"] is None
+
+
+def test_restarting_the_engine_does_not_void_a_live_approval(client, monkeypatch):
+    """It did, and it surfaced as "no such approval" on somebody's open checkout.
+
+    The mock holds carts in process memory, so a miss there means the engine
+    restarted rather than the basket changing — calling that "changed" sent
+    people looking for a change that never happened.
+    """
+    grant_id = grant(client, refused(client)["cart_id"]).json()["grant"]["grant_id"]
+    monkeypatch.setattr(web.MARKETPLACE, "fetch_cart", lambda _: None)
+
+    out = client.get(f"/api/grant/{grant_id}").json()
+
+    assert out["state"] == "ready"
+    assert out["order_id"] is not None
+    # And it still shows what was approved, from its own snapshot.
+    assert [i["name"] for i in out["items"]] == ["Smartwatch"]
+
+
+def test_a_grant_survives_the_process_it_was_minted_in(client, tmp_path, monkeypatch):
+    """A fifteen-minute approval that a deploy can silently void is not one."""
+    monkeypatch.setattr(web, "GRANTS_PATH", tmp_path / "grants.json")
+    grant_id = grant(client, refused(client)["cart_id"]).json()["grant"]["grant_id"]
+
+    # Everything in memory goes, as it would on a restart.
+    web.GRANTS.clear()
+    web.POLICIES.pop(grant_id, None)
+    web.load_grants()
+
+    assert grant_id in web.GRANTS
+    # The policy comes back too — restored without it, the checkout would answer
+    # and then `decide()` would refuse it as `mandate.unknown`, which is worse.
+    assert web.POLICIES[grant_id].cart_id is not None
+    assert client.get(f"/api/grant/{grant_id}").json()["state"] == "ready"
 
 
 # --- what the checkout may fill in, and what it may never -----------------------

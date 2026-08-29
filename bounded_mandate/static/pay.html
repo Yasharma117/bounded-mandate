@@ -82,7 +82,11 @@ let grant = null;
 async function load() {
   const r = await fetch(`/api/grant/${encodeURIComponent(grantID)}`);
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) { msg(d.detail || "This approval could not be found.", "err"); return; }
+  if (!r.ok) {
+    msg(d.detail || "This approval could not be found.", "err");
+    $("pay").hidden = true;   // a Pay button under an error is a trap
+    return;
+  }
   grant = d;
 
   $("basket").innerHTML = d.items.map(i => row(i.name, rupees(i.price_paise))).join("");

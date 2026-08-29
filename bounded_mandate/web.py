@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import re
 import secrets
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from html import escape
 from pathlib import Path
@@ -49,6 +50,7 @@ from .wording import action, chip, summary, title
 @contextlib.asynccontextmanager
 async def _lifespan(_: FastAPI):
     """Run the scheduler for as long as the app is up, if it is switched on."""
+    load_grants()
     task = asyncio.create_task(_scheduler()) if os.environ.get("BM_SCHEDULER") == "1" else None
     try:
         yield
@@ -79,6 +81,13 @@ class Grant:
     merchant: str
     order_id: str | None
     key_id: str | None
+    #: The lines that were approved, as they stood at that moment.
+    #:
+    #: A grant *is* a snapshot — you approved those lines at that total — so it
+    #: carries them rather than refetching. Without this the checkout re-read a
+    #: cart held in process memory, and an engine restart turned a live approval
+    #: into "this basket has changed", which was not what had happened.
+    items: list[dict] = field(default_factory=list)
     #: Set once a signed callback confirms the money moved. A grant pays once.
     payment_id: str | None = None
 
@@ -128,7 +137,92 @@ POLICIES: dict[str, Policy] = {
 # One-time grants, minted by the user and spent once. Kept apart from POLICIES
 # only in that this half holds the *checkout* — the authority itself is an
 # ordinary Policy in POLICIES, judged by the same `decide()` as everything else.
+#
+# Persisted, because they were not and it showed: restarting the engine while
+# somebody had a checkout open answered their payment link with "no such
+# approval". A fifteen-minute grant that a deploy can silently void is not a
+# grant, and the reader had already done the one thing the product asks of them.
 GRANTS: dict[str, Grant] = {}
+GRANTS_PATH = Path(os.environ.get("BM_GRANTS", "grants.json"))
+
+
+def _policy_json(policy: Policy) -> dict:
+    return {
+        "mandate_id": policy.mandate_id,
+        "per_txn_max_paise": policy.per_txn_max_paise,
+        "merchants": sorted(policy.merchants),
+        "categories": sorted(policy.categories),
+        "delivery_addresses": sorted(policy.delivery_addresses),
+        "max_charges_per_window": policy.max_charges_per_window,
+        "window_days": policy.window_days,
+        "status": policy.status.value,
+        "expires_at": policy.expires_at.isoformat() if policy.expires_at else None,
+        "cart_id": policy.cart_id,
+    }
+
+
+def _policy_from(raw: dict) -> Policy:
+    return Policy(
+        mandate_id=raw["mandate_id"],
+        per_txn_max_paise=raw["per_txn_max_paise"],
+        merchants=frozenset(raw["merchants"]),
+        categories=frozenset(raw["categories"]),
+        delivery_addresses=frozenset(raw["delivery_addresses"]),
+        max_charges_per_window=raw["max_charges_per_window"],
+        window_days=raw["window_days"],
+        status=MandateStatus(raw["status"]),
+        expires_at=datetime.fromisoformat(raw["expires_at"]) if raw["expires_at"] else None,
+        cart_id=raw.get("cart_id"),
+    )
+
+
+def save_grants() -> None:
+    """Write every grant out. Called after anything that mints or spends one."""
+    rows = [
+        {
+            "grant_id": g.grant_id,
+            "policy": _policy_json(g.policy),
+            "cart_id": g.cart_id,
+            "amount_paise": g.amount_paise,
+            "merchant": g.merchant,
+            "order_id": g.order_id,
+            "key_id": g.key_id,
+            "items": g.items,
+            "payment_id": g.payment_id,
+        }
+        for g in GRANTS.values()
+    ]
+    GRANTS_PATH.write_text(json.dumps(rows, indent=1), encoding="utf-8")
+
+
+def load_grants() -> None:
+    """Read them back, and put their policies where the engine looks.
+
+    A grant restored without its policy would answer its checkout and then be
+    refused by `decide()` as `mandate.unknown`, which is a worse failure than
+    the one this fixes.
+    """
+    if not GRANTS_PATH.exists():
+        return
+    try:
+        rows = json.loads(GRANTS_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    for raw in rows:
+        policy = _policy_from(raw["policy"])
+        GRANTS[raw["grant_id"]] = Grant(
+            grant_id=raw["grant_id"],
+            policy=policy,
+            cart_id=raw["cart_id"],
+            amount_paise=raw["amount_paise"],
+            merchant=raw["merchant"],
+            order_id=raw.get("order_id"),
+            key_id=raw.get("key_id"),
+            items=raw.get("items") or [],
+            payment_id=raw.get("payment_id"),
+        )
+        POLICIES[raw["grant_id"]] = policy
+
 
 # Test-mode placeholders. A real deployment reads these off the signed-in user.
 DEMO_CUSTOMER = {
@@ -457,8 +551,10 @@ def grant_once(body: GrantRequest) -> dict:
         merchant=cart.merchant,
         order_id=rendered.get("order_id"),
         key_id=rendered.get("key_id"),
+        items=rendered.get("items") or [],
     )
     GRANTS[grant_id] = grant
+    save_grants()
     return {
         "grant": _grant_bounds(grant),
         "decision": rendered,
@@ -471,13 +567,24 @@ def read_grant(grant_id: str) -> dict:
     """What the checkout page needs, and no more than that."""
     grant = GRANTS.get(grant_id)
     if grant is None:
-        raise HTTPException(404, "no such approval")
-    cart = MARKETPLACE.fetch_cart(grant.cart_id)
-    # Cart ids are content-addressed, so a basket that moved after the grant was
-    # minted no longer answers to the id the grant names. That is not a missing
-    # cart, it is a *different* one — and the order already sitting on Razorpay
-    # is for a total nobody has looked at since. Spendable stops here.
-    state = "stale" if cart is None and not grant.payment_id else grant.state()
+        raise HTTPException(
+            404,
+            "This approval is no longer here — it was spent, it lapsed, or the "
+            "engine was restarted under it. Approve the basket again in the app "
+            "and a fresh one will open. Nothing was charged.",
+        )
+    # On the live path cart ids are content-addressed, so a basket that moved
+    # after the grant was minted no longer answers to the id the grant names.
+    # That is not a missing cart, it is a *different* one, and the order sitting
+    # on Razorpay is for a total nobody has looked at since — so it stops here.
+    #
+    # Only on the live path. The mock holds carts in process memory, where a
+    # miss means the engine restarted rather than the basket changing, and
+    # calling that "changed" sent people looking for a change that never
+    # happened. The engine pins `cart_id` either way, so nothing can be
+    # substituted for what was approved.
+    moved = is_live() and MARKETPLACE.fetch_cart(grant.cart_id) is None
+    state = "stale" if moved and not grant.payment_id else grant.state()
     return {
         **_grant_bounds(grant),
         "state": state,
@@ -493,10 +600,9 @@ def read_grant(grant_id: str) -> dict:
         "prefill": {k: v for k, v in DEMO_CUSTOMER.items() if k in ("name", "email", "contact")},
         "customer_id": _CUSTOMER,
         "payment_id": grant.payment_id,
-        "items": [
-            {"name": i.name, "price_paise": i.price_paise, "category": i.category}
-            for i in (cart.items if cart else ())
-        ],
+        # From the grant's own snapshot, so the page shows what was approved
+        # rather than whatever the shop happens to hold now.
+        "items": grant.items,
     }
 
 
@@ -634,6 +740,7 @@ def verify_settlement(body: Callback) -> dict:
     if grant is not None:
         grant.payment_id = body.razorpay_payment_id
         POLICIES[grant.grant_id] = replace(grant.policy, status=MandateStatus.REVOKED)
+        save_grants()
 
     LEDGER.append(
         {
