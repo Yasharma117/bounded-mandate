@@ -456,6 +456,29 @@ listener to something that cannot listen. A test pins that.
 Text-to-speech failures are swallowed on purpose. Losing audio should never cost
 the user a decision they can already read on screen.
 
+### Two voices, switchable mid-sentence
+
+Both ElevenLabs and Rumik have been wired since the voice work landed, and the
+keys for both are configured. Neither the picker nor `Voice.providers()` was
+ever called from the app, so Rumik was reachable and unselectable — built, and
+in practice dead.
+
+The control now sits in voice mode itself, because the difference is one to
+judge by ear rather than from a table. Measured on the same sentence:
+
+| | latency | payload |
+|---|---|---|
+| ElevenLabs | 0.60s | 75 KB `audio/mpeg` |
+| Rumik (Silk, `mulberry`/`siya`) | 2.43s | 264 KB `audio/wav` |
+
+Four times slower is four times the silence before it answers, which in a
+conversation is the thing you notice first — and it is the sort of trade-off
+that only reads properly out loud.
+
+Which voices exist is answered by the engine, never guessed by the app: the keys
+live server-side, so offering one that is not configured would be offering a
+503.
+
 ### Voice mode
 
 Typing and talking are separate doors. The field is for typing and stays
@@ -1170,7 +1193,7 @@ a second mandate from the basket the engine fetched, `GET /pay` is a real
 Standard Checkout, and paying revokes the grant. Delivery is a user-owned
 choice over the account's own address book, matched by id rather than prose,
 and every line the user reads carries the merchant's own product photography.
-351 Python tests and 49 Swift tests, no network.
+354 Python tests and 49 Swift tests, no network.
 
 **Phase 4 (the home screen) — built.** Eight states, each a real engine outcome
 reachable through ordinary actions rather than a demo switch.

@@ -58,11 +58,21 @@ final class VoiceSession {
     private var openedMic: Date?
     private var running = false
     /// Which service speaks. Changed live, so both can be judged by ear.
-    private var provider: String?
+    private(set) var provider: String?
+    /// What the engine can speak with, asked once when voice mode opens.
+    private(set) var providers: [String] = []
 
     var isActive: Bool { phase != .idle }
 
     func use(provider name: String) { provider = name }
+
+    /// Ask the engine which voices it has. The keys live there, so the list
+    /// does too — the app has no way of knowing which are configured.
+    func loadProviders() async {
+        let answer = await Voice.providers()
+        providers = answer.available
+        if provider == nil { provider = answer.current }
+    }
 
     // MARK: - the loop
 
@@ -74,6 +84,7 @@ final class VoiceSession {
             return
         }
         running = true
+        await loadProviders()
         // The whole conversation is one task. Cancelling it is how it stops,
         // which means no path can leave a half-configured session behind.
         loop = Task { await converse() }

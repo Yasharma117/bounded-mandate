@@ -228,3 +228,45 @@ def test_the_providers_route_lists_what_can_speak(client):
     body = client.get("/api/voice/providers").json()
     assert set(body["providers"]) == {"elevenlabs", "rumik"}
     assert body["default"] in body["providers"]
+
+
+# --- both voices are real, and both are reachable ------------------------------
+
+
+def test_the_engine_reports_every_voice_it_can_actually_use(client):
+    """The keys live on the server, so the list does too — the app has no way of
+    knowing which are configured, and guessing would offer a voice that 503s."""
+    out = client.get("/api/voice/providers").json()
+
+    assert set(out["providers"]) == {"elevenlabs", "rumik"}
+    assert out["default"] in out["providers"]
+
+
+def test_either_voice_can_be_asked_for_by_name(client, monkeypatch):
+    """`use(provider:)` in the app sends this. It was wired on both sides and
+    called from neither, so Rumik was reachable and unselectable."""
+    from bounded_mandate import voice as module
+
+    spoken: list[str] = []
+
+    def fake(name):
+        def speak(text):
+            spoken.append(name)
+            return module.Speech(b"audio", "audio/wav", name)
+
+        return speak
+
+    monkeypatch.setattr(
+        module, "SPEAKERS", {"elevenlabs": fake("elevenlabs"), "rumik": fake("rumik")}
+    )
+    for name in ("rumik", "elevenlabs"):
+        out = client.post("/api/voice/speak", json={"text": "hello", "provider": name})
+        assert out.status_code == 200
+        assert out.headers["X-Voice-Provider"] == name
+
+    assert spoken == ["rumik", "elevenlabs"]
+
+
+def test_a_voice_nobody_configured_is_refused_by_name(client):
+    out = client.post("/api/voice/speak", json={"text": "hello", "provider": "nope"})
+    assert out.status_code == 503

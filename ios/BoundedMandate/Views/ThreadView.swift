@@ -248,11 +248,14 @@ struct ThreadView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             } else {
-                Text(voice?.phase.label ?? "")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(theme.textSubtle)
-                    .contentTransition(.opacity)
-                    .animation(Motion.enter(0.2), value: voice?.phase)
+                VStack(spacing: 10) {
+                    Text(voice?.phase.label ?? "")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(theme.textSubtle)
+                        .contentTransition(.opacity)
+                        .animation(Motion.enter(0.2), value: voice?.phase)
+                    if let voice, voice.providers.count > 1 { voices(voice) }
+                }
             }
 
             GlassEffectContainer(spacing: 22) {
@@ -281,6 +284,27 @@ struct ThreadView: View {
             Motion.respectful(voice == nil ? Motion.unmorph : Motion.morph, reduced: reduceMotion),
             value: voice == nil
         )
+    }
+
+    /// Which voice is speaking, switchable mid-conversation.
+    ///
+    /// Both are wired and both work; they do not sound alike and they do not
+    /// answer alike — one is about four times slower to return, which in a
+    /// conversation is four times the silence before it says anything. That is
+    /// a judgement to make by ear rather than from a table, so the control is
+    /// here rather than in a settings screen nobody opens.
+    private func voices(_ session: VoiceSession) -> some View {
+        GlassEffectContainer(spacing: 8) {
+            HStack(spacing: 6) {
+                ForEach(session.providers, id: \.self) { name in
+                    Button(name.capitalized) { session.use(provider: name) }
+                        .buttonStyle(.glass)
+                        .font(.system(size: 12, weight: session.provider == name ? .semibold : .regular))
+                        .tint(session.provider == name ? theme.primary : theme.textMuted)
+                }
+            }
+        }
+        .transition(.opacity.animation(Motion.enter(0.16)))
     }
 
     private var openers: some View {
