@@ -842,6 +842,35 @@ Also closed on the way: `MandateCard` was only ever reachable from a one-time
 grant, so **the standing rule — the central object of the product — had no
 screen and no route.** It is the page header now.
 
+### The voice agent holds a conversation
+
+The loop was already listen → transcribe → answer → listen again. What made it
+a sequence of unrelated commands rather than a conversation was that every turn
+arrived with no idea what the last one was.
+
+The agent is now given what was **said** — the user's words and its own replies,
+capped at ten turns so a long session cannot push the system prompt out of the
+model's attention. Tool calls and results are deliberately left out: a cart id
+from three turns ago is not context, it is a reference the agent could charge
+against long after the basket stopped existing, and Layer 0 would then be
+refusing a cart nobody meant to propose.
+
+```
+you : what's on my list?
+it  : Here's your list: Aashirvaad atta 5kg, Basmati rice 1kg, ...
+you : what would that cost?
+it  : The cheapest total is ₹1,736.00 at Blinkit. Would you like me to order?
+you : alright, order it
+it  : Your order has been authorised. The total is ₹1,850.00.      [ALLOW]
+you : and was that within my limit?
+it  : Yes, the order was authorised, so it was within your limit.
+```
+
+Note the fourth turn: it mentioned a cheaper shop and then ordered at Instamart
+anyway, because it cannot change shops on its own. It also speaks its own words
+now — a canned `narrate` string used to override the agent whenever a decision
+existed, so every order sounded identical to every other one.
+
 ## Where things get delivered
 
 The third thing the user owns, and the one with the sharpest edge on it. A

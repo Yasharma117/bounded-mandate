@@ -146,6 +146,24 @@ struct Home: Decodable, Sendable {
         }
     }
 
+    /// What the basket strip shows.
+    ///
+    /// A decision's basket when there is one — and otherwise the list that is
+    /// about to go out, because "₹1,850 of your ₹2,000 cap" is a figure, and
+    /// the twelve things it is about to buy are what that figure means.
+    /// Pre-flight is the one screen where seeing them still changes something:
+    /// it has not happened yet.
+    var strip: [CartLine] {
+        if let goods = decision?.goods, !goods.isEmpty { return goods }
+        guard let listID, let list = lists.first(where: { $0.listID == listID }) else { return [] }
+        return list.items.map {
+            CartLine(
+                name: $0.name, pricePaise: $0.pricePaise ?? 0, category: $0.category,
+                url: $0.url, imageURL: $0.imageURL
+            )
+        }
+    }
+
     /// Whether this state is one the reader can put down. A refusal and a live
     /// grant are not — one wants a decision, the other is spending a clock.
     var dismissable: Bool { state == "needs_you" && decision != nil }

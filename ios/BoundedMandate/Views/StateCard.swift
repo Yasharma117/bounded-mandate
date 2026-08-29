@@ -88,9 +88,9 @@ struct StateCard: View {
                 }
                 .padding(16)
 
-                if let goods = home.decision?.goods, !goods.isEmpty {
+                if !home.strip.isEmpty {
                     Divider().overlay(theme.borderSubtle)
-                    basket(goods)
+                    basket(home.strip)
                 }
 
                 if !home.actions.isEmpty {
