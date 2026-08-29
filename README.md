@@ -1193,12 +1193,68 @@ a second mandate from the basket the engine fetched, `GET /pay` is a real
 Standard Checkout, and paying revokes the grant. Delivery is a user-owned
 choice over the account's own address book, matched by id rather than prose,
 and every line the user reads carries the merchant's own product photography.
-354 Python tests and 49 Swift tests, no network.
+362 Python tests and 49 Swift tests, no network.
 
 **Phase 4 (the home screen) — built.** Eight states, each a real engine outcome
 reachable through ordinary actions rather than a demo switch.
 
 Next: an app icon and the recorded walkthrough.
+
+## Which shop, and whether it is answering
+
+Asked for blue Lays, a chunky Kit Kat, Sprite, Diet Coke and banana chips, the
+agent answered that none of them were in stock anywhere. **It was telling the
+truth** — the engine was on the mock, whose catalogue is seventeen staples.
+Live Instamart has all five, thirty-odd results each.
+
+Nothing on any screen said which shop was in play, so a truthful "not stocked"
+was indistinguishable from a broken integration. Two changes:
+
+**Unset now means the real one if you can.**
+
+| `BM_COMMERCE` | token | shop |
+|---|---|---|
+| unset | set | **live Instamart** |
+| unset | unset | mock |
+| `mock` / `swiggy` | — | exactly that |
+
+Nothing in CI holds a token, so nothing in CI moved. `BM_COMMERCE=mock` is how
+you get the two mock-only scenes back — cross-shop comparison needs three shops,
+and a prompt injection cannot be written into a real merchant's catalogue.
+
+**And the app says so.** `/api/home` carries a `shop` block, and the home screen
+shows one amber line whenever what you are looking at is not a live shop that is
+answering. A live shop that works is the expected case and gets no furniture.
+
+### A shop that is down is a 503, not a 500
+
+Probing the same blindness with a dead token found its twin: `/api/catalog` and
+`/api/agent` answered bare `Internal Server Error`, while `/api/lists` answered
+200 as though the shop were merely empty. Every route now carries the adapter's
+own message, which names the five-day expiry and the fix — and `/api/home` stays
+200 and reports `reachable: false`, because a screen that 503s cannot show you
+why it 503'd.
+
+### Two bugs in resolving a name
+
+Both found by ordering real snacks rather than by reading code.
+
+**Nothing matching meant buy anything.** `_best_match` required the whole query
+to appear inside a product name and, failing that, took the cheapest of
+everything the search returned — so "blue Lays x3" bought *Too Yumm Veggie
+Stix*. A candidate must now share a distinctive word with the request, and no
+match is an honest answer. That is not a similarity score: it is the much weaker
+claim that a product with no word in common is not the thing that was asked for.
+
+**Three packets meant three lines.** The agent expresses quantity by naming the
+thing three times, and `update_cart` given the same `skuId` three times does not
+add three — it rejects the whole basket and returns an empty cart, surfacing as
+`cart carries no total`. Duplicates are counted into a quantity now.
+
+Live, afterwards: `blue Lays` → *Lays Chips Cream N Masala Combo*, `chunky Kit
+Kat` → *KITKAT Chunky Bar 40 g*, and the engine returned `CLARIFY` on a **₹0
+Kalyan Jewellers silver voucher Swiggy had added on its own** — an unasked-for
+item reaching the reader as a question rather than in the box.
 
 ## Commerce: an adapter, and a mock behind it
 

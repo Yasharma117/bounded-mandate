@@ -43,6 +43,8 @@ from .ledger import Ledger
 from .merchant import MERCHANT_NAME, UnknownItem, UnknownMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
 from .swiggy import ADDRESS_ID as SWIGGY_ADDRESS_ID
+from .swiggy import SwiggyUnavailable
+from .swiggy_mcp import SwiggySessionError
 from .voice import SPEAKERS, TTS_PROVIDER, VoiceUnavailable, speak, transcribe
 from .wording import action, chip, summary, title
 
@@ -247,6 +249,24 @@ def customer_id(gw: RazorpayGateway) -> str | None:
         except GatewayError:
             return None
     return _CUSTOMER
+
+
+#: Anything the commerce adapter raises when the shop cannot be reached. The
+#: transport wraps its own errors into `SwiggyUnavailable`, but both are caught
+#: so a future adapter cannot slip a bare exception past this.
+SHOP_DOWN = (SwiggyUnavailable, SwiggySessionError)
+
+
+def shop_down(exc: Exception) -> HTTPException:
+    """A 503 carrying the adapter's own words.
+
+    These used to escape as bare 500s — `Internal Server Error`, no reason —
+    from `/api/catalog` and `/api/agent`, while `/api/lists` answered 200 as
+    though the shop were merely empty. Five days after a token is issued that is
+    the difference between a demo and a mystery, and the adapter already writes
+    a message naming the expiry and the fix.
+    """
+    return HTTPException(503, str(exc))
 
 
 def gateway() -> RazorpayGateway:
@@ -674,20 +694,26 @@ def run_agent(body: Instruction) -> dict:
     policy it is governed by, so `adversarial` changes only what the agent tries
     — never what the engine permits.
     """
-    agent = BuyerAgent(
-        marketplace=MARKETPLACE,
-        shopping_list=LISTS.get("usual"),
-        policies=POLICIES,
-        ledger=LEDGER,
-        mandate_id="mdt_demo",
-        delivery_address=DELIVERY_ID,
-        system=ADVERSARIAL_SYSTEM if body.adversarial else None,
-    )
     try:
+        # Constructed inside the try: building one opens the model client, and a
+        # missing provider key raised out of here as a bare 500 with no reason.
+        agent = BuyerAgent(
+            marketplace=MARKETPLACE,
+            shopping_list=LISTS.get("usual"),
+            policies=POLICIES,
+            ledger=LEDGER,
+            mandate_id="mdt_demo",
+            delivery_address=DELIVERY_ID,
+            system=ADVERSARIAL_SYSTEM if body.adversarial else None,
+        )
         run = agent.run(
             body.text,
             history=[{"from": t.from_, "text": t.text} for t in body.history],
         )
+    except SHOP_DOWN as exc:
+        # The shop, not the model. Told apart because the answers differ: one
+        # wants a retry, the other wants a new token.
+        raise shop_down(exc) from exc
     except Exception as exc:  # a model outage is a 502, not a silent approval
         raise HTTPException(502, f"the agent could not run: {exc}") from exc
 
@@ -874,7 +900,11 @@ def _offer_rows(query: str) -> list[dict]:
     """
     policy = POLICIES["mdt_demo"]
     rows = []
-    for offer in MARKETPLACE.search(query):
+    try:
+        found = MARKETPLACE.search(query)
+    except SHOP_DOWN as exc:
+        raise shop_down(exc) from exc
+    for offer in found:
         seller, item = _offer_parts(offer)
         rows.append(
             {
@@ -951,8 +981,8 @@ def product_detail(name: str, merchant: str = MERCHANT_NAME) -> dict:
 
     try:
         found = MARKETPLACE.search(_search_term(name))
-    except Exception:
-        found = []
+    except SHOP_DOWN as exc:
+        raise shop_down(exc) from exc
     alternatives = []
     for offer in found:
         seller, thing = _offer_parts(offer)
@@ -1076,6 +1106,9 @@ def _list_rows(shopping: ShoppingList) -> dict:
     """
     policy = POLICIES["mdt_demo"]
     seller = next(iter(policy.merchants))
+    # Live lists carry no prices by design — a price per line is a
+    # `search_products` per line — so an unreachable shop changes nothing here
+    # and the `shop` block on `/api/home` is what reports it.
     catalog = {} if is_live() else MARKETPLACE[seller].catalog
     items = [
         {
@@ -1144,6 +1177,45 @@ def _unstocked(names: list[str]) -> list[str]:
     if is_live():
         return []
     return [name for name in names if name not in MARKETPLACE[MERCHANT_NAME].catalog]
+
+
+def _shop_state() -> dict:
+    """Which shop the engine is talking to, and whether it is answering.
+
+    On screen because nothing said it, and a truthful "none of those are in
+    stock" from a seventeen-item fixture is indistinguishable from a broken
+    integration. A whole conversation went into finding that out.
+
+    Decided here rather than in the app for the usual reason: the app cannot see
+    `BM_COMMERCE` or whether a token exists, and guessing would be inventing an
+    answer about the thing most worth being exact about.
+    """
+    if not is_live():
+        size = len(MARKETPLACE[MERCHANT_NAME].catalog)
+        return {
+            "backend": "mock",
+            "reachable": True,
+            "catalogue": f"{size} items",
+            "detail": (
+                f"A simulated shop of {size} staples — real prices, invented. "
+                "Anything outside it will honestly come back unstocked."
+            ),
+        }
+    try:
+        MARKETPLACE.addresses()
+    except SHOP_DOWN as exc:
+        return {
+            "backend": "swiggy",
+            "reachable": False,
+            "catalogue": "unreachable",
+            "detail": str(exc),
+        }
+    return {
+        "backend": "swiggy",
+        "reachable": True,
+        "catalogue": "live",
+        "detail": "Live Instamart. Prices, stock and photographs are the real ones.",
+    }
 
 
 class NewList(BaseModel):
@@ -1318,7 +1390,13 @@ def _product(merchant: str, name: str):
     a person opened by tapping a link, and not on any path the agent walks.
     """
     if is_live():
-        matches = [item for _, item in map(_offer_parts, MARKETPLACE.search(name))]
+        # Guarded here rather than at each caller, because there are two of them
+        # and one of them escaped as a bare 500 for exactly that reason.
+        try:
+            found = MARKETPLACE.search(name)
+        except SHOP_DOWN as exc:
+            raise shop_down(exc) from exc
+        matches = [item for _, item in map(_offer_parts, found)]
         return next((m for m in matches if m.name == name), None) or next(iter(matches), None)
     try:
         return MARKETPLACE[merchant].catalog[name]
@@ -1551,7 +1629,12 @@ def _rule_block() -> dict:
     whose whole subject it is.
     """
     policy = POLICIES["mdt_demo"]
-    here = next((a for a in _address_rows() if a["selected"]), None)
+    # An unreachable shop must not take the whole screen down: the `shop` block
+    # is what reports it, and a home screen that 503s cannot show you why.
+    try:
+        here = next((a for a in _address_rows() if a["selected"]), None)
+    except (HTTPException, *SHOP_DOWN):
+        here = None
     return {
         "per_txn_max_paise": policy.per_txn_max_paise,
         "merchants": sorted(policy.merchants),
@@ -1601,6 +1684,7 @@ def home() -> dict:
 
     return {
         "rule": _rule_block(),
+        "shop": _shop_state(),
         "state": current.state,
         "chip": chip(current.state),
         "headline": current.headline,
@@ -1691,6 +1775,12 @@ def run_due_lists(now: datetime | None = None) -> list[dict]:
             cart = MARKETPLACE.create_cart(list(shopping.item_names), merchant="instamart")
         except (UnknownMerchant, UnknownItem) as exc:
             out.append({"list_id": list_id, "error": str(exc.args[0])})
+            continue
+        except SHOP_DOWN as exc:
+            # Recorded against the list rather than raised: one unreachable shop
+            # should not stop the tick, and a run that could not happen is worth
+            # saying so about.
+            out.append({"list_id": list_id, "error": str(exc)})
             continue
 
         decision = decide(

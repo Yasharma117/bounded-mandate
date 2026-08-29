@@ -56,6 +56,7 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if let home = store.home {
                         rule(home.rule)
+                        if let shop = home.shop, shop.caveat { caveat(shop) }
                         pots(home.lists)
                         verbs
                         StateCard(
@@ -190,6 +191,24 @@ struct HomeView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 2)
+    }
+
+    /// Said out loud only when it needs saying — a live shop that is answering
+    /// is the expected case and deserves no furniture.
+    private func caveat(_ shop: Shop) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: shop.reachable ? "flask" : "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.notice)
+                .padding(.top, 1)
+            Text(shop.detail)
+                .font(.system(size: 12))
+                .foregroundStyle(theme.notice)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(theme.notice.opacity(0.10), in: .rect(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - the lists, as pots

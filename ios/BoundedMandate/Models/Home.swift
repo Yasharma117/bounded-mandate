@@ -45,6 +45,23 @@ struct Rule: Decodable, Hashable, Sendable {
     }
 }
 
+/// Which shop the engine is talking to, and whether it is answering.
+///
+/// On screen because nothing said it. Asked for Lays, a Kit Kat and a Diet Coke
+/// against a seventeen-item fixture, the agent truthfully answered that none of
+/// them existed — indistinguishable, from the outside, from a broken
+/// integration. A whole conversation went into finding that out.
+struct Shop: Decodable, Hashable, Sendable {
+    let backend: String
+    let reachable: Bool
+    let catalogue: String
+    let detail: String
+
+    /// True when what is on screen is not the real shop, either because it is
+    /// simulated or because the real one is not answering.
+    var caveat: Bool { backend != "swiggy" || !reachable }
+}
+
 /// One route the engine is offering. **Proposed, never taken** — the same
 /// contract it keeps with the agent, rendered as UI.
 struct HomeAction: Decodable, Hashable, Sendable, Identifiable {
@@ -122,6 +139,7 @@ struct LedgerRow: Decodable, Hashable, Sendable, Identifiable {
 /// Where do I stand — answered before anybody asks.
 struct Home: Decodable, Sendable {
     let rule: Rule
+    let shop: Shop?
     /// `at_rest` · `preflight` · `ruled` · `needs_you` · `grant_live`.
     /// **Decided server-side**, like every other judgement in this app.
     let state: String
@@ -173,7 +191,7 @@ struct Home: Decodable, Sendable {
     var dismissable: Bool { state == "needs_you" && decision != nil }
 
     enum CodingKeys: String, CodingKey {
-        case rule, state, chip, headline, detail, actions, decision, lists, recent
+        case rule, shop, state, chip, headline, detail, actions, decision, lists, recent
         case grantID = "grant_id"
         case listID = "list_id"
         case chainIntact = "chain_intact"

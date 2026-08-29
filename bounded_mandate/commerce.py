@@ -31,7 +31,26 @@ from .merchant import Marketplace
 from .swiggy import SwiggyAdapter
 from .swiggy_mcp import SwiggyMCP
 
-BACKEND = os.environ.get("BM_COMMERCE", "mock").strip().lower()
+
+def _resolve() -> str:
+    """Which shop this process talks to.
+
+    Unset means "the real one if you can". A seventeen-item fixture cannot hold
+    an ordinary conversation — asked for Lays, a Kit Kat and a Diet Coke it
+    truthfully answers that none of them exist, which is indistinguishable from
+    a broken integration — so defaulting to it *while a working session sits
+    unused* was the wrong way round.
+
+    Nothing in CI acquires a token, so nothing in CI moves: the offline suite
+    pins `Marketplace()` on every client and builds its own merchants besides.
+    """
+    named = os.environ.get("BM_COMMERCE", "").strip().lower()
+    if named:
+        return named
+    return "swiggy" if os.environ.get("SWIGGY_ACCESS_TOKEN", "").strip() else "mock"
+
+
+BACKEND = _resolve()
 
 
 def is_live() -> bool:

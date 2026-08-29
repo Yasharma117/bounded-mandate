@@ -845,3 +845,79 @@ class TestProductImages:
         for tool in (BuyerAgent._search_catalog, BuyerAgent._create_cart):
             source = inspect.getsource(tool)
             assert "image" not in source.lower(), f"{tool.__name__} leaks an image to the model"
+
+
+class TestNameResolution:
+    """Two bugs found by ordering real snacks on the live shop."""
+
+    def shop(self, offers):
+        adapter = SwiggyAdapter(lambda tool, **_: {}, address_id="addr_1")
+        adapter.search = lambda _q: offers  # type: ignore[method-assign]
+        return adapter
+
+    def offer(self, name, paise, sku="s1"):
+        from bounded_mandate.swiggy import Offer
+
+        return Offer(
+            sku_id=sku, spin_id="p" + sku, name=name, price_paise=paise, category="", in_stock=True
+        )
+
+    def test_a_product_sharing_no_word_is_not_a_match(self):
+        """Asked for "blue Lays x3" the old rule found no name containing the
+        whole query, fell back to the cheapest of everything the search
+        returned, and bought Too Yumm Veggie Stix.
+
+        Silently returning something unrelated is worse than returning nothing:
+        the reader gets a cart of things they did not ask for, and every bound
+        the engine checks is satisfied by it.
+        """
+        shop = self.shop(
+            [
+                self.offer("Too Yumm Veggie Stix 60 g", 4_500),
+                self.offer("Cadbury Dairy Milk 17 g", 1_900, sku="s2"),
+            ]
+        )
+        assert shop._best_match("blue Lays x3") is None
+
+    def test_the_cheapest_of_the_things_that_do_match(self):
+        """Cheapest among plausible matches, not cheapest overall — an agent
+        that asked for milk and got the premium pack has spent more of a cap
+        than the reader expected."""
+        shop = self.shop(
+            [
+                self.offer("Lays Magic Masala 52 g", 5_000),
+                self.offer("Lays Cream Onion 25 g", 2_000, sku="s2"),
+                self.offer("Bingo Mad Angles 40 g", 1_000, sku="s3"),
+            ]
+        )
+        match = shop._best_match("blue Lays x3")
+        assert match is not None
+        assert match.name == "Lays Cream Onion 25 g"
+
+    def test_pack_words_do_not_count_as_agreement(self):
+        """ "x3" and "packet" are in every second product name, so counting them
+        would make any two things look alike."""
+        shop = self.shop([self.offer("Britannia Biscuits 1 packet x3", 3_000)])
+        assert shop._best_match("blue Lays x3 packet") is None
+
+    def test_asking_for_three_sends_a_quantity_not_three_lines(self):
+        """The agent says "three packets" by naming the thing three times, and
+        `update_cart` given the same skuId three times does not add three — it
+        rejects the whole basket and answers with an empty cart, which surfaced
+        as the unilluminating "cart carries no total"."""
+        sent: dict = {}
+
+        def call(tool, **params):
+            if tool == "update_cart":
+                sent.update(params)
+                return {}
+            if tool == "get_cart":
+                return json.loads((PAYLOADS / "swiggy_cart.json").read_text())
+            return {}
+
+        adapter = SwiggyAdapter(call, address_id="addr_1")
+        adapter.search = lambda _q: [self.offer("Lays Magic Masala 52 g", 5_000)]  # type: ignore[method-assign]
+        adapter.create_cart(["blue Lays", "blue Lays", "blue Lays"])
+
+        assert len(sent["items"]) == 1, "the same product was sent as three lines"
+        assert sent["items"][0]["quantity"] == 3

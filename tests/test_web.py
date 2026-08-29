@@ -752,3 +752,77 @@ def test_a_widened_name_still_finds_the_product(client):
 
 def test_an_unstocked_product_is_a_404(client):
     assert client.get("/api/product", params={"name": "Ferrari"}).status_code == 404
+
+
+# --- which shop, and whether it is answering ----------------------------------
+
+
+def test_the_backend_is_the_real_one_when_there_is_a_session(monkeypatch):
+    """A seventeen-item fixture cannot hold an ordinary conversation. Asked for
+    Lays, a Kit Kat and a Diet Coke it truthfully says none exist — which from
+    outside is indistinguishable from a broken integration, and cost a whole
+    conversation to find out.
+
+    So unset means "the real one if you can". Nothing in CI holds a token, so
+    nothing in CI moves.
+    """
+    from bounded_mandate.commerce import _resolve
+
+    cases = {
+        ("", ""): "mock",
+        ("", "tok"): "swiggy",
+        ("mock", "tok"): "mock",
+        ("swiggy", ""): "swiggy",
+    }
+    for (named, token), expected in cases.items():
+        monkeypatch.setenv("BM_COMMERCE", named)
+        monkeypatch.setenv("SWIGGY_ACCESS_TOKEN", token)
+        assert _resolve() == expected, f"BM_COMMERCE={named!r} token={bool(token)}"
+
+
+def test_home_says_which_shop_it_is_talking_to(client):
+    shop = client.get("/api/home").json()["shop"]
+
+    assert shop["backend"] == "mock"
+    assert shop["reachable"]
+    assert shop["catalogue"] == "17 items"
+    # The sentence exists so nobody has to deduce it from an empty search.
+    assert "simulated" in shop["detail"]
+
+
+def test_an_unreachable_shop_does_not_take_the_screen_down(client, monkeypatch):
+    """A home screen that 503s cannot show you why it 503'd."""
+    from bounded_mandate.swiggy import SwiggyUnavailable
+
+    def refuse():
+        raise SwiggyUnavailable("Swiggy rejected the token. Access tokens last five days.")
+
+    monkeypatch.setattr(web, "is_live", lambda: True)
+    monkeypatch.setattr(web.MARKETPLACE, "addresses", refuse, raising=False)
+
+    out = client.get("/api/home")
+
+    assert out.status_code == 200
+    shop = out.json()["shop"]
+    assert shop["backend"] == "swiggy"
+    assert not shop["reachable"]
+    assert "five days" in shop["detail"]
+
+
+def test_a_shop_that_is_down_is_a_503_with_the_reason(client, monkeypatch):
+    """These escaped as bare 500s — `Internal Server Error`, no reason — while
+    `/api/lists` answered 200 as though the shop were merely empty. Five days
+    after a token is issued that is the difference between a demo and a
+    mystery."""
+    from bounded_mandate.swiggy import SwiggyUnavailable
+
+    def refuse(*_args, **_kwargs):
+        raise SwiggyUnavailable("Swiggy rejected the token. Re-run the OAuth flow.")
+
+    monkeypatch.setattr(web, "is_live", lambda: True)
+    monkeypatch.setattr(web.MARKETPLACE, "search", refuse)
+
+    for path in ("/api/catalog?q=lays", "/api/product?name=Lays", "/m/instamart/p/Lays"):
+        out = client.get(path)
+        assert out.status_code == 503, f"{path} answered {out.status_code}"
+        assert "OAuth" in out.json()["detail"]

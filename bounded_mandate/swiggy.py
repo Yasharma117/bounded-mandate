@@ -37,6 +37,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -186,6 +187,45 @@ class CartReport:
         )
 
 
+#: Words that describe a pack rather than a product, plus the quantity suffixes
+#: the agent is told to put in a name ("blue Lays x3"). Dropped before matching,
+#: or "x3" counts as something the request and the product have in common.
+_NOISE = frozenset(
+    {
+        "x",
+        "pack",
+        "packet",
+        "packets",
+        "can",
+        "cans",
+        "bottle",
+        "kg",
+        "g",
+        "gm",
+        "ml",
+        "l",
+        "ltr",
+        "litre",
+        "pc",
+        "pcs",
+        "piece",
+        "pieces",
+        "of",
+        "the",
+        "a",
+    }
+)
+
+
+def _words(text: str) -> frozenset[str]:
+    """The distinctive words in a product name or a request."""
+    return frozenset(
+        word
+        for raw in re.split(r"[^a-z0-9]+", text.casefold())
+        if (word := raw.strip("0123456789")) and word not in _NOISE
+    )
+
+
 def cart_id_for(items: list[CartItem], total_paise: int) -> str:
     """Content-address a cart, so its id survives having no etag.
 
@@ -307,38 +347,68 @@ class SwiggyAdapter:
         adapter does not have.
         """
         requested = categories or {}
-        chosen: list[tuple[Offer, int]] = []
+        #: sku -> (offer, quantity), in the order first asked for.
+        #:
+        #: Counted rather than repeated, because the agent says "three packets"
+        #: by naming the thing three times, and `update_cart` given the same
+        #: `skuId` three times does not add three — it rejects the whole basket
+        #: and answers with an empty cart, which surfaced here as the
+        #: unilluminating "cart carries no total".
+        wanted: dict[str, tuple[Offer, int]] = {}
         resolved: dict[str, str] = {}
         swaps: list[tuple[str, str]] = []
         for name in item_names:
             match = self._best_match(name)
             if match is None:
                 raise UnknownItem(name)
-            chosen.append((match, 1))
+            offer, already = wanted.get(match.sku_id, (match, 0))
+            wanted[match.sku_id] = (offer, already + 1)
             # Keyed by what Swiggy returned, not by what was asked for: the
             # classification belongs to the product that ended up in the cart.
             if requested.get(name):
                 resolved[match.name] = requested[name]
-            if match.name != name:
+            if match.name != name and (name, match.name) not in swaps:
                 swaps.append((name, match.name))
 
-        report = self.build_cart(chosen, categories=resolved)
+        report = self.build_cart(list(wanted.values()), categories=resolved)
         self._substituted = tuple(swaps)
         return report.cart
 
     def _best_match(self, name: str) -> Offer | None:
-        """Cheapest in-stock variation whose name contains the query.
+        """The cheapest in-stock variation that is actually the thing asked for.
 
-        Cheapest rather than closest: an agent that asked for milk and got the
-        premium two-litre pack has spent more of a cap than the user expected,
-        and the engine would be right to escalate something the adapter chose.
+        Cheapest *among plausible matches*, not cheapest overall. An agent that
+        asked for milk and got the premium two-litre pack has spent more of a cap
+        than the user expected — but the older rule required the whole query to
+        appear inside the product name, and fell back to the cheapest of
+        everything the search returned when it did not.
+
+        Live, "blue Lays x3" matched no name, so that fallback bought **Too Yumm
+        Veggie Stix**. Silently returning something unrelated is worse than
+        returning nothing: the user reads a cart of things they did not ask for,
+        and every bound the engine checks is satisfied by it.
+
+        So a candidate must share a distinctive word with the request. That is
+        deliberately not a similarity score — this file already carries the note
+        about why judging *whether a substitution matters* cannot be done by word
+        counting. It is the much weaker claim that a product with no word in
+        common is not a match at all, and no match is an honest answer.
         """
         offers = [o for o in self.search(name) if o.in_stock]
         if not offers:
             return None
-        wanted = name.casefold()
-        exact = [o for o in offers if wanted in o.name.casefold()]
-        return min(exact or offers, key=lambda o: o.price_paise)
+
+        wanted = _words(name)
+        if not wanted:
+            return min(offers, key=lambda o: o.price_paise)
+
+        def overlap(offer: Offer) -> int:
+            return len(wanted & _words(offer.name))
+
+        best = max(overlap(o) for o in offers)
+        if best == 0:
+            return None  # nothing here is the thing that was asked for
+        return min((o for o in offers if overlap(o) == best), key=lambda o: o.price_paise)
 
     def build_cart(
         self, items: list[tuple[Offer, int]], *, categories: dict | None = None
