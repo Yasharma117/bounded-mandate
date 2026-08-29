@@ -275,21 +275,23 @@ def test_a_basket_that_moved_after_approval_hands_out_no_checkout(client, monkey
 
 
 def test_a_charge_order_names_the_customer_so_a_card_can_be_remembered(client):
-    """The only part of "fill in my details" that can honestly be done. Naming
-    the customer is what lets Razorpay offer a saved card on the next checkout,
-    so the second approval asks for a CVV rather than sixteen digits."""
+    """Not passing this is why the account had two captured payments and zero
+    saved cards. With it, the card is entered once and every approval after is
+    the saved card with no CVV — Standard Checkout runs the CVV-less flow by
+    default on Visa, Mastercard and Amex."""
     grant(client, refused(client)["cart_id"])
 
     assert client.gateway.customers == ["cust_1"], "no customer attached to the charge"
 
 
 def test_the_checkout_payload_carries_contact_details_and_nothing_more(client):
-    """A card number never reaches this codebase.
+    """The card is Razorpay's to hold, not ours.
 
-    Standard Checkout is hosted precisely so a PAN never touches an application
-    server, and an agent that could type one would be an agent holding a card —
-    which is the thing this whole product argues against. So the absence here is
-    the feature, and it is worth a test rather than a comment.
+    Not a principle being defended — network tokenisation is exactly how every
+    app saves a card, and this one does too. It is simply that the PAN lives
+    behind the hosted form and a token comes back, so there is nothing
+    card-shaped for this payload to carry and a regression that added one would
+    be a real problem.
     """
     grant_id = grant(client, refused(client)["cart_id"]).json()["grant"]["grant_id"]
 

@@ -188,15 +188,17 @@ class RazorpayGateway:
                 "receipt": idempotency_key[:40],
                 "notes": {"description": description},
             }
-            # Naming the customer is what lets Razorpay *remember the card*, so
-            # the second checkout asks for a CVV instead of a card number.
+            # Naming the customer is what lets Razorpay remember the card.
             #
-            # It is the only part of "fill in my details for me" that can
-            # honestly be done: the card itself never touches this codebase, and
-            # that is not a limitation to work around. Standard Checkout is
-            # hosted precisely so a PAN never reaches an application server, and
-            # an agent that could type a card number is an agent holding a card
-            # — which is the thing this whole product argues against.
+            # First payment: the card is entered and saved. Every one after
+            # that is the saved card with **no CVV** — RBI-sanctioned network
+            # tokenisation, and on Standard Checkout the CVV-less flow is on by
+            # default for Visa, Mastercard and Amex. So the second approval is a
+            # tap, and the OTP autofills from SMS like it does everywhere else.
+            #
+            # Not passing this is why the account had two captured payments and
+            # zero saved cards, and why the checkout asked for a full card every
+            # time. That was our omission, not a property of hosted checkout.
             if customer_id:
                 body["customer_id"] = customer_id
             order = self.client.order.create(body)
