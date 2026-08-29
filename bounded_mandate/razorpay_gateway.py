@@ -164,7 +164,12 @@ class RazorpayGateway:
     # --- charging: user-absent, every time -----------------------------------
 
     def create_charge_order(
-        self, *, amount_paise: int, idempotency_key: str, description: str
+        self,
+        *,
+        amount_paise: int,
+        idempotency_key: str,
+        description: str,
+        customer_id: str | None = None,
     ) -> str:
         """Put an authorised charge on Razorpay's rails, server-side.
 
@@ -177,14 +182,24 @@ class RazorpayGateway:
         if amount_paise < MIN_AMOUNT_PAISE:
             raise GatewayError(f"amount must be at least {MIN_AMOUNT_PAISE} paise")
         try:
-            order = self.client.order.create(
-                {
-                    "amount": amount_paise,
-                    "currency": "INR",
-                    "receipt": idempotency_key[:40],
-                    "notes": {"description": description},
-                }
-            )
+            body = {
+                "amount": amount_paise,
+                "currency": "INR",
+                "receipt": idempotency_key[:40],
+                "notes": {"description": description},
+            }
+            # Naming the customer is what lets Razorpay *remember the card*, so
+            # the second checkout asks for a CVV instead of a card number.
+            #
+            # It is the only part of "fill in my details for me" that can
+            # honestly be done: the card itself never touches this codebase, and
+            # that is not a limitation to work around. Standard Checkout is
+            # hosted precisely so a PAN never reaches an application server, and
+            # an agent that could type a card number is an agent holding a card
+            # — which is the thing this whole product argues against.
+            if customer_id:
+                body["customer_id"] = customer_id
+            order = self.client.order.create(body)
         except Exception as exc:
             raise _wrap(exc, "could not create charge order") from exc
         return order["id"]

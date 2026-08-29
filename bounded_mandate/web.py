@@ -138,6 +138,23 @@ DEMO_CUSTOMER = {
 }
 
 
+#: Created once and reused. Every charge order is attached to it, which is what
+#: lets Razorpay offer a saved card on the second checkout.
+_CUSTOMER: str | None = None
+
+
+def customer_id(gw: RazorpayGateway) -> str | None:
+    """The Razorpay customer these orders belong to, or `None` if it cannot be
+    made — a saved card is a convenience, and losing it must not lose the sale."""
+    global _CUSTOMER
+    if _CUSTOMER is None:
+        try:
+            _CUSTOMER = gw.create_customer(**DEMO_CUSTOMER)
+        except GatewayError:
+            return None
+    return _CUSTOMER
+
+
 def gateway() -> RazorpayGateway:
     try:
         return RazorpayGateway()
@@ -158,6 +175,7 @@ def _settle(decision, cart_items: int) -> dict:
             amount_paise=decision.total_paise,
             idempotency_key=decision.idempotency_key,
             description=f"Bounded Mandate · {cart_items} items",
+            customer_id=customer_id(gw),
         )
     except GatewayAuthError as exc:
         raise HTTPException(401, str(exc)) from exc
@@ -469,6 +487,11 @@ def read_grant(grant_id: str) -> dict:
         # hands out no order id, so an old tab cannot open a checkout.
         "order_id": grant.order_id if state == "ready" else None,
         "key_id": grant.key_id if state == "ready" else None,
+        # Everything the checkout may fill in on the user's behalf, which is
+        # their contact details and nothing else. A card number is not on this
+        # list and cannot be — see `create_charge_order`.
+        "prefill": {k: v for k, v in DEMO_CUSTOMER.items() if k in ("name", "email", "contact")},
+        "customer_id": _CUSTOMER,
         "payment_id": grant.payment_id,
         "items": [
             {"name": i.name, "price_paise": i.price_paise, "category": i.category}

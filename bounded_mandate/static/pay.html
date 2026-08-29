@@ -54,8 +54,8 @@
   </div>
 
   <button id="pay" disabled>Pay</button>
-  <p class="fine">One payment, this basket only, and it lapses in fifteen minutes.
-    Nothing here can be re-used and nothing here raises your standing rule.</p>
+  <p class="fine" id="fine">One payment, this basket only, and it lapses in fifteen
+    minutes. Nothing here can be re-used and nothing here raises your standing rule.</p>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -89,6 +89,10 @@ async function load() {
   if (d.state !== "ready") { msg("The engine did not authorise this basket.", "err"); return; }
 
   $("pay").textContent = "Pay " + rupees(d.amount_paise);
+  $("fine").textContent =
+    "Your card is entered here, on Razorpay's own page — it never reaches this app "
+    + "or the agent. Tick 'remember this card' and the next approval asks only for a CVV. "
+    + "A standing mandate skips this screen entirely.";
   $("pay").disabled = false;
   tick(new Date(d.expires_at));
 }
@@ -111,7 +115,15 @@ $("pay").onclick = () => {
     key: grant.key_id, order_id: grant.order_id,
     amount: grant.amount_paise, currency: "INR",
     name: "Bounded Mandate", description: "One-time approved purchase",
-    prefill: { name: "Bounded Mandate Demo", email: "demo@bounded-mandate.test", contact: "9999999999" },
+    // From the server, not baked into this page — and contact details only.
+    // A card number is the one thing nobody here can fill in for you: Standard
+    // Checkout is hosted so a card never reaches an application server, and an
+    // agent that could type one would be an agent holding your card.
+    prefill: grant.prefill || {},
+    customer_id: grant.customer_id || undefined,
+    // Offers to remember the card, so the next approval is a CVV rather than
+    // sixteen digits. Razorpay holds the token; we never see the number.
+    remember_customer: true,
     handler: async (r) => {
       const res = await fetch("/api/settlement/verify", {
         method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(r),

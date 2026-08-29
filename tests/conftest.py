@@ -67,6 +67,9 @@ class FakeGateway:
     def __init__(self, *, order_error=None, verify_error=None):
         self.order_error, self.verify_error = order_error, verify_error
         self.charged = []
+        #: Which customer each charge order was attached to. `None` means the
+        #: card cannot be remembered, which is a real state worth seeing.
+        self.customers = []
 
     def create_customer(self, **_):
         return "cust_1"
@@ -89,8 +92,9 @@ class FakeGateway:
 
     key_id = "rzp_test_key"
 
-    def create_charge_order(self, *, amount_paise, idempotency_key, description):
+    def create_charge_order(self, *, amount_paise, idempotency_key, description, customer_id=None):
         self.charged.append(amount_paise)
+        self.customers.append(customer_id)
         return "order_charge_1"
 
 

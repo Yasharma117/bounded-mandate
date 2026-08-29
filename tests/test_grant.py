@@ -7,6 +7,7 @@ one-time approval is still not allowed to do.
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -268,3 +269,33 @@ def test_a_basket_that_moved_after_approval_hands_out_no_checkout(client, monkey
 
     assert out["state"] == "stale"
     assert out["order_id"] is None and out["key_id"] is None
+
+
+# --- what the checkout may fill in, and what it may never -----------------------
+
+
+def test_a_charge_order_names_the_customer_so_a_card_can_be_remembered(client):
+    """The only part of "fill in my details" that can honestly be done. Naming
+    the customer is what lets Razorpay offer a saved card on the next checkout,
+    so the second approval asks for a CVV rather than sixteen digits."""
+    grant(client, refused(client)["cart_id"])
+
+    assert client.gateway.customers == ["cust_1"], "no customer attached to the charge"
+
+
+def test_the_checkout_payload_carries_contact_details_and_nothing_more(client):
+    """A card number never reaches this codebase.
+
+    Standard Checkout is hosted precisely so a PAN never touches an application
+    server, and an agent that could type one would be an agent holding a card —
+    which is the thing this whole product argues against. So the absence here is
+    the feature, and it is worth a test rather than a comment.
+    """
+    grant_id = grant(client, refused(client)["cart_id"]).json()["grant"]["grant_id"]
+
+    payload = client.get(f"/api/grant/{grant_id}").json()
+
+    assert set(payload["prefill"]) == {"name", "email", "contact"}
+    body = json.dumps(payload).lower()
+    for forbidden in ("card", "cvv", "pan", "expiry", "number"):
+        assert forbidden not in body, f"the checkout payload mentions {forbidden}"
