@@ -19,6 +19,11 @@ struct StateCard: View {
 
     private var tint: Color { home.tint(theme) }
 
+    /// Every reason except the one already said as the headline sentence.
+    private var others: [Reason] {
+        (home.decision?.reasons ?? []).filter { $0.detail != home.detail }
+    }
+
     var body: some View {
         Card(tint: tint) {
             VStack(alignment: .leading, spacing: 0) {
@@ -53,9 +58,35 @@ struct StateCard: View {
                             .foregroundStyle(theme.textSubtle)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
+
+                        // The deciding reason is the sentence above. These are
+                        // the others — a refusal usually has three, and running
+                        // them together made one breath out of three separate
+                        // problems.
+                        if !others.isEmpty {
+                            VStack(alignment: .leading, spacing: 5) {
+                                ForEach(others.prefix(2), id: \.self) { reason in
+                                    HStack(alignment: .top, spacing: 7) {
+                                        Circle().fill(tint.opacity(0.7))
+                                            .frame(width: 4, height: 4).padding(.top, 6)
+                                        Text(reason.detail)
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(theme.textMuted)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                if others.count > 2 {
+                                    Text("and \(others.count - 2) more")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(theme.textMuted)
+                                        .padding(.leading, 11)
+                                }
+                            }
+                            .padding(.top, 2)
+                        }
                     }
                 }
-                .padding(18)
+                .padding(16)
 
                 if let goods = home.decision?.goods, !goods.isEmpty {
                     Divider().overlay(theme.borderSubtle)
@@ -81,7 +112,7 @@ struct StateCard: View {
                                         .foregroundStyle(theme.textMuted)
                                 }
                                 .padding(.horizontal, 18)
-                                .frame(minHeight: 50)
+                                .frame(minHeight: 46)
                                 .contentShape(.rect)
                             }
                             .buttonStyle(.pressable)
@@ -105,7 +136,7 @@ struct StateCard: View {
                 ForEach(goods) { line in
                     VStack(alignment: .leading, spacing: 6) {
                         ZStack(alignment: .topTrailing) {
-                            ProductThumb(url: line.imageURL, side: 62)
+                            ProductThumb(url: line.imageURL, side: 52)
                             if line.flagged {
                                 Image(systemName: "exclamationmark.circle.fill")
                                     .font(.system(size: 13))
@@ -128,11 +159,11 @@ struct StateCard: View {
                             .monospacedDigit()
                             .foregroundStyle(line.flagged ? tint : theme.textSubtle)
                     }
-                    .frame(width: 62)
+                    .frame(width: 52)
                 }
             }
             .padding(.horizontal, 18)
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
         }
         .scrollIndicators(.hidden)
     }

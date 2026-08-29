@@ -1164,8 +1164,16 @@ def _needs_you(decision: dict) -> HomeState:
     answers merchant and category separately.
     """
     codes = decision.get("reason_code", "")
-    reasons = [r.get("detail", "") for r in decision.get("reasons") or []]
-    detail = " ".join(reasons) or summary(codes)
+    rows = decision.get("reasons") or []
+    # The *deciding* reason, not all of them run together. Concatenating every
+    # detail produced a paragraph — "This cart was already authorised. 2 items
+    # outside your scope: Bluetooth earbuds, Phone case. Already 1 order in the
+    # last 4 days." — which is three separate problems in one breath. The rest
+    # travel as `reasons` and the card lists them; this is the sentence.
+    deciding = next(
+        (r for r in rows if r.get("verdict") == decision.get("verdict")), rows[0] if rows else {}
+    )
+    detail = deciding.get("detail") or summary(codes)
     rupees = f"₹{decision.get('total_paise', 0) / 100:,.0f}"
 
     if "delivery.unknown_address" in codes:

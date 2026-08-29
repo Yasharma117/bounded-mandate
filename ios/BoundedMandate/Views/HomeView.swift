@@ -48,7 +48,7 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 16) {
                     if let home = store.home {
                         rule(home.rule)
                         pots(home.lists)
@@ -157,7 +157,7 @@ struct HomeView: View {
                 Eyebrow(text: "Your rule is running", color: theme.primary)
             }
             Text(rupees(rule.perTxnMaxPaise))
-                .font(.system(size: 36, weight: .medium))
+                .font(.system(size: 32, weight: .medium))
                 .monospacedDigit()
                 .kerning(-1.1)
                 .foregroundStyle(theme.textNormal)
@@ -178,19 +178,31 @@ struct HomeView: View {
         HStack(spacing: 12) {
             ForEach(lists.prefix(2)) { list in
                 Card(tint: list.overCap ? theme.notice : nil) {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 7) {
                         Eyebrow(text: list.name, color: theme.textMuted)
                         Text(rupees(list.totalPaise))
-                            .font(.system(size: 22, weight: .semibold))
+                            .font(.system(size: 20, weight: .semibold))
                             .monospacedDigit()
                             .foregroundStyle(theme.textNormal)
+                        // How much of the cap this list would spend. A number
+                        // beside a number is arithmetic the reader has to do;
+                        // a bar is the answer.
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(theme.borderSubtle)
+                                Capsule()
+                                    .fill(list.overCap ? theme.notice : theme.primary)
+                                    .frame(width: geo.size.width * min(1, list.capUsed))
+                            }
+                        }
+                        .frame(height: 3)
                         Text(list.schedule)
                             .font(.system(size: 12))
                             .foregroundStyle(theme.textMuted)
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
+                    .padding(12)
                 }
             }
         }
@@ -210,11 +222,11 @@ struct HomeView: View {
 
     private func verb(_ symbol: String, _ label: String, _ act: @escaping () -> Void) -> some View {
         Button(action: act) {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 Image(systemName: symbol)
-                    .font(.system(size: 20))
+                    .font(.system(size: 18))
                     .foregroundStyle(theme.primary)
-                    .frame(width: 64, height: 64)
+                    .frame(width: 54, height: 54)
                     .background(theme.bgSubtle, in: .circle)
                 Text(label.uppercased())
                     .font(.system(size: 11, weight: .medium))
