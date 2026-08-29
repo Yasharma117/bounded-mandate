@@ -842,9 +842,26 @@ tools over the same account: its payments category is `capture_payment`,
 subscriptions, mandates or tokens anywhere in it. An MCP wrapper cannot grant a
 capability the account lacks.
 
-Unblocking needs exactly one thing, and it is not code: **recurring / UPI Autopay
-enabled on the account** (which in turn wants activation completed). `charge()`
-is already written and tested against that day.
+**Saved cards do not work either, and for the same reason.** The integration is
+correct — the customer exists, Checkout sees it, `customer_id` reaches the
+options object, the order carries it, `remember_customer` is in the account's
+own `options` list. A card was entered and saved. What came back:
+
+```
+Customers API   /v1/customers/{id}/tokens   count: 1
+                token_TVkC6GvnCXtmX3   status: failed   Visa ****1007
+
+Checkout API    /v1/preferences?customer_id=…   tokens: 0
+                — under every parameter combination tried
+```
+
+The token is created and then fails, so Checkout offers nothing and shows an
+empty card form. Nothing in this codebase changes that.
+
+Unblocking needs exactly one thing, and it is not code: **account activation,
+and with it recurring / UPI Autopay**. That one change unblocks three separate
+walls — the mandate debit, server-side charging, and card tokenisation.
+`charge()` is already written and tested against that day.
 
 **The fallback, if that is refused.** Razorpay orders support manual capture
 (`payment_capture: 0`): the user authorises once in checkout, the payment sits
