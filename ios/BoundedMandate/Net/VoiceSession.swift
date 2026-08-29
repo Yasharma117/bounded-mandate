@@ -180,8 +180,13 @@ final class VoiceSession {
         thread.append(.said(id: "u-\(key)", from: .user, text: heard))
 
         do {
-            let result = try await Engine.runAgent(heard)
-            let spoken = result.decision.map(Self.narrate) ?? result.said
+            let result = try await Engine.runAgent(heard, history: thread.spokenSoFar)
+            // Its own words, not a canned line. `narrate` used to override the
+            // agent whenever a decision existed, so every order sounded
+            // identical to every other one — which is the opposite of a
+            // conversation. It is the fallback now, for when the agent says
+            // nothing at all.
+            let spoken = result.said.isEmpty ? (result.decision.map(Self.narrate) ?? "") : result.said
             // Cards arrive as the conversation earns them. Spoken numbers are
             // the thing a voice interface is worst at, so prices land on screen
             // rather than only in the air.

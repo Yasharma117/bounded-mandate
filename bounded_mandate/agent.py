@@ -21,9 +21,32 @@ from .basket import ShoppingList
 from .engine import Decision, Policy, Proposal, decide
 from .ledger import Ledger
 from .llm import MODEL, default_client
-from .merchant import Marketplace, UnknownMerchant
+from .merchant import MERCHANT_NAME, Marketplace, UnknownMerchant
+
+
+def _paise(value: object) -> int | None:
+    """A money argument from a model, or `None` if it is not one.
+
+    Never a float and never a coercion of something ambiguous: this figure is
+    the claim the whole provenance check compares against, so a value we had to
+    guess at is worse than no value.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    return None
+
 
 MAX_TURNS = 16
+
+#: How much of the conversation the agent is reminded of. Enough for "make it
+#: Blinkit instead" to mean something, short enough that a long session cannot
+#: push the system prompt out of the model's attention.
+MAX_HISTORY = 10
+MAX_TURN_CHARS = 600
 
 SYSTEM = """You are a shopping agent. You place orders on behalf of someone who
 has already told you what they want and set standing limits on your spending.
@@ -314,26 +337,61 @@ class BuyerAgent:
         if name == "read_shopping_list":
             return self._read_shopping_list()
         if name == "search_catalog":
-            return self._search_catalog(args.get("query", ""))
+            return self._search_catalog(str(args.get("query") or ""))
         if name == "create_cart":
+            names = args.get("item_names") or []
+            if not isinstance(names, list):
+                return {"error": "item_names must be a list of names"}
             return self._create_cart(
-                args.get("item_names") or [], args.get("merchant") or "instamart"
+                [str(n) for n in names], str(args.get("merchant") or MERCHANT_NAME)
             )
         if name == "request_charge":
-            return self._request_charge(
-                run, args.get("cart_id", ""), int(args.get("claimed_total_paise") or 0)
-            )
+            claimed = _paise(args.get("claimed_total_paise"))
+            if claimed is None:
+                # A model emitting `'18>\n185000'` for a money field is not a
+                # thing to crash on. Handed back as an error it can act on, the
+                # same as `not stocked` — a malformed argument should cost one
+                # retry, not the whole run. Left unguarded this raised
+                # ValueError out of the route as a 502 mid-conversation.
+                return {"error": "claimed_total_paise must be a whole number of paise"}
+            return self._request_charge(run, str(args.get("cart_id") or ""), claimed)
         return {"error": f"no such tool: {name}"}
 
     # --- the loop ------------------------------------------------------------
 
-    def run(self, instruction: str, *, max_turns: int = MAX_TURNS) -> AgentRun:
+    def run(
+        self,
+        instruction: str,
+        *,
+        history: list[dict[str, str]] | None = None,
+        max_turns: int = MAX_TURNS,
+    ) -> AgentRun:
+        """One turn, with the conversation so far behind it.
+
+        `history` is what was *said* — the user's words and the agent's replies,
+        nothing else. Tool calls and their results are deliberately left out: a
+        cart id from three turns ago is not context, it is a reference the agent
+        could charge against long after the basket stopped existing, and Layer 0
+        would then be refusing a cart nobody meant to propose.
+
+        Without this each turn arrived with no idea what the last one was, so
+        "make it from Blinkit instead" landed as a sentence about nothing. That
+        is the difference between a voice interface and a conversation.
+
+        History is untrusted in exactly the way the instruction is — it is the
+        user's own text coming back — and it widens nothing: the agent still
+        cannot read its policy, still holds no rail, and the engine still
+        refetches the cart it is asked to charge.
+        """
         out = AgentRun(instruction)
         self._shop = None
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.system},
-            {"role": "user", "content": instruction},
-        ]
+        messages: list[dict[str, Any]] = [{"role": "system", "content": self.system}]
+        for turn in (history or [])[-MAX_HISTORY:]:
+            role = "assistant" if turn.get("from") == "agent" else "user"
+            said = (turn.get("text") or "").strip()
+            if said:
+                messages.append({"role": role, "content": said[:MAX_TURN_CHARS]})
+        messages.append({"role": "user", "content": instruction})
 
         for _ in range(max_turns):
             completion = self.client.chat.completions.create(

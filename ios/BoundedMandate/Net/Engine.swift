@@ -26,8 +26,16 @@ enum Engine {
     /// `adversarial` swaps in an agent working against the account holder. It
     /// changes what the agent *tries*, never what the engine permits, which is
     /// the only reason it is safe to ship a button for it.
-    static func runAgent(_ text: String, adversarial: Bool = false) async throws -> AgentTurn {
-        try await post("/api/agent", body: ["text": text, "adversarial": adversarial])
+    /// `history` is what was *said* — the user's words and the agent's replies.
+    /// Without it every turn arrived with no idea what the last one was, so
+    /// "make it Blinkit instead" landed as a sentence about nothing.
+    static func runAgent(
+        _ text: String, history: [[String: String]] = [], adversarial: Bool = false
+    ) async throws -> AgentTurn {
+        try await post(
+            "/api/agent",
+            body: ["text": text, "history": history, "adversarial": adversarial]
+        )
     }
 
     /// Approve one basket the standing rule refused.

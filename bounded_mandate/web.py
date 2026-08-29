@@ -514,8 +514,22 @@ def submit_proposal(body: ProposalRequest) -> dict:
     )
 
 
+class Turn(BaseModel):
+    """One thing that was said. Not a tool call, and not a cart id."""
+
+    from_: str = Field(alias="from", description="`user` or `agent`")
+    text: str = ""
+
+    model_config = {"populate_by_name": True}
+
+
 class Instruction(BaseModel):
     text: str = Field(min_length=1, description="What the user said, typed or spoken")
+    history: list[Turn] = Field(
+        default_factory=list,
+        max_length=40,
+        description="The conversation so far, so a follow-up means something.",
+    )
     adversarial: bool = Field(
         default=False,
         description="Run the compromised agent instead. The engine is not told which.",
@@ -540,7 +554,10 @@ def run_agent(body: Instruction) -> dict:
         system=ADVERSARIAL_SYSTEM if body.adversarial else None,
     )
     try:
-        run = agent.run(body.text)
+        run = agent.run(
+            body.text,
+            history=[{"from": t.from_, "text": t.text} for t in body.history],
+        )
     except Exception as exc:  # a model outage is a 502, not a silent approval
         raise HTTPException(502, f"the agent could not run: {exc}") from exc
 

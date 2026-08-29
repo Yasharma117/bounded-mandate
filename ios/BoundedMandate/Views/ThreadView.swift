@@ -93,6 +93,19 @@ final class Thread {
         }
     }
 
+    /// The conversation so far, as plain turns.
+    ///
+    /// Only what was *said*. Cards are not sent: a cart id from three turns ago
+    /// is a reference the agent could charge against long after the basket
+    /// stopped existing, and the engine would then be refusing a cart nobody
+    /// meant to propose.
+    var spokenSoFar: [[String: String]] {
+        messages.suffix(12).compactMap { message in
+            guard case .said(_, let from, let text) = message else { return nil }
+            return ["from": from == .user ? "user" : "agent", "text": text]
+        }
+    }
+
     func send(_ text: String, adversarial: Bool = false) async {
         let said = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !said.isEmpty, !busy else { return }
@@ -103,8 +116,10 @@ final class Thread {
         append(.said(id: "u-\(turn)", from: .user, text: said))
 
         do {
-            let result = try await Engine.runAgent(said, adversarial: adversarial)
-            let spoken = result.decision.map(narrate) ?? result.said
+            let result = try await Engine.runAgent(
+                said, history: spokenSoFar, adversarial: adversarial
+            )
+            let spoken = result.said.isEmpty ? (result.decision.map(narrate) ?? "") : result.said
             append(contentsOf: Message.from(result, spoken: spoken, key: "\(turn)"))
             // Deliberately silent. Typing is a quiet interaction, and
             // answering it aloud is the app talking over you — speech belongs
