@@ -141,6 +141,10 @@ struct Home: Decodable, Sendable {
     func tint(_ theme: Token.Palette) -> Color {
         switch state {
         case "needs_you": decision.map { theme.color(for: $0.verdict) } ?? theme.notice
+        // Paid and on its way is the one unambiguously good outcome on this
+        // screen, and it reads as the brand colour for the same reason `allow`
+        // does — authorised is what blue means here.
+        case "paid": theme.primary
         case "grant_live": theme.orchid
         default: theme.primary
         }

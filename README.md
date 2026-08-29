@@ -826,14 +826,22 @@ reimplementing it. The prose lives in
 [wording.py](bounded_mandate/wording.py) beside the reason titles, for the
 reason that module already existed.
 
-Precedence: something waiting on you, then money already committed, then the
-newest thing that happened, then the next thing due.
+Precedence: something waiting on you, then money already committed, then money
+that actually **moved**, then the newest thing that happened, then the next
+thing due.
+
+That third rung is its own state because an order is not a payment — a
+distinction this codebase insists on everywhere and had no screen for. A settled
+payment used to fall through to `ruled`, which says "placed while you were
+away": wrong twice over, since the reader was standing there paying and nothing
+told them the money had actually gone.
 
 | State | What it leads with | Offers |
 |---|---|---|
 | `at_rest` | "Your rule is running." | view rule · pause |
 | `preflight` | "My usual groceries goes out shortly. ₹1,850 of your ₹2,000 cap. **Nothing for you to do.**" | pause · view basket |
 | `ruled` | "Ordered — ₹1,850, inside your rule. Placed **while you were away**." | view basket · verify the chain |
+| `paid` | "Paid — ₹215. It is on its way." Carries the Razorpay reference. | view basket · verify the chain |
 | `needs_you` — escalation | "Your call on ₹2,400." Names *which* two items. | approve just this basket · remove the flagged items · not now |
 | `needs_you` — refusal | "Refused, and nothing was charged." | see what it tried. **Nothing else.** |
 | `needs_you` — clarify | "One line needs an answer." | add to my list · approve once · leave it out |
@@ -1121,7 +1129,7 @@ a second mandate from the basket the engine fetched, `GET /pay` is a real
 Standard Checkout, and paying revokes the grant. Delivery is a user-owned
 choice over the account's own address book, matched by id rather than prose,
 and every line the user reads carries the merchant's own product photography.
-326 Python tests and 46 Swift tests, no network.
+347 Python tests and 49 Swift tests, no network.
 
 **Phase 4 (the home screen) — built.** Eight states, each a real engine outcome
 reachable through ordinary actions rather than a demo switch.

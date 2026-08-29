@@ -249,3 +249,53 @@ def test_the_cap_meter_measures_the_list_against_the_cap(client):
     # 92.5% of the cap, which is what the bar is that full of, and what
     # "₹150 under your cap" says out loud.
     assert row["cap_paise"] - row["total_paise"] == 15_000
+
+
+# --- money that moved, as distinct from an order that was placed ---------------
+
+
+def paid_grant(client):
+    """Approve a basket and settle it, the way the checkout does."""
+    escalated = client.post(
+        "/api/proposal", json={"items": ["Smartwatch"], "claimed_total_paise": 1_500_000}
+    ).json()
+    client.post("/api/mandate/one-time", json={"cart_id": escalated["cart_id"]})
+    client.post(
+        "/api/settlement/verify",
+        json={
+            "razorpay_order_id": "order_charge_1",
+            "razorpay_payment_id": "pay_1",
+            "razorpay_signature": "sig",
+        },
+    )
+
+
+def test_a_completed_payment_gets_its_own_state(client):
+    """It used to fall through to `ruled`, which says "placed while you were
+    away" — wrong twice: the reader was standing there paying, and an order is
+    not a payment. That distinction is insisted on everywhere else in this
+    codebase and had no screen."""
+    paid_grant(client)
+    out = home(client)
+
+    assert out["state"] == "paid"
+    assert out["chip"] == "Paid"
+    assert "on its way" in out["headline"].lower()
+    assert "pay_1" in out["detail"]
+
+
+def test_the_receipt_shows_the_basket_that_was_paid_for(client):
+    paid_grant(client)
+
+    items = home(client)["decision"]["items"]
+    assert [i["name"] for i in items] == ["Smartwatch"]
+
+
+def test_money_that_moved_outranks_an_order_that_did_not(client):
+    """A settled payment is the newer fact than the ALLOW that created it."""
+    paid_grant(client)
+    assert home(client)["state"] == "paid"
+
+    # And an unspent approval still outranks it, because it is still waiting.
+    client.post("/api/proposal", json={"items": OVER, "claimed_total_paise": 240_000})
+    assert home(client)["state"] == "needs_you"

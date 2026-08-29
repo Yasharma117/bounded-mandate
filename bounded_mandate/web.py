@@ -1345,16 +1345,20 @@ class HomeState:
     list_id: str | None = None
 
 
-def _ledger_view() -> tuple[set[str], list[dict]]:
+def _ledger_view() -> tuple[set[str], list[dict], list[dict]]:
     """One pass over the ledger for everything home needs from it.
 
-    Returns dismissed idempotency keys, and every decision oldest-first.
+    Dismissed keys, every decision oldest-first, and every settlement — which is
+    the only record that money actually moved rather than an order being placed.
     """
     dismissed: set[str] = set()
     decisions: list[dict] = []
+    settled: list[dict] = []
     for entry in LEDGER.entries():
         payload = entry.payload
-        if payload.get("event") == "SEEN":
+        if payload.get("event") == "SETTLED":
+            settled.append({**payload, "ts": entry.ts})
+        elif payload.get("event") == "SEEN":
             dismissed.add(payload.get("idempotency_key"))
         elif payload.get("event") == "HALTED":
             decisions.append(
@@ -1368,7 +1372,7 @@ def _ledger_view() -> tuple[set[str], list[dict]]:
             )
         elif payload.get("verdict"):
             decisions.append({**payload, "ts": entry.ts})
-    return dismissed, decisions
+    return dismissed, decisions, settled
 
 
 def _needs_you(decision: dict) -> HomeState:
@@ -1434,7 +1438,7 @@ def _home_state(now: datetime | None = None) -> HomeState:
     everything because it is the only state where the product is stuck.
     """
     now = now or datetime.now(UTC)
-    dismissed, decisions = _ledger_view()
+    dismissed, decisions, settlements = _ledger_view()
     latest = next(
         (d for d in reversed(decisions) if d.get("idempotency_key") not in dismissed), None
     )
@@ -1450,6 +1454,25 @@ def _home_state(now: datetime | None = None) -> HomeState:
             "It lapses in fifteen minutes and can be spent once.",
             ("pay", "let_lapse"),
             grant_id=live.grant_id,
+        )
+
+    # Money that actually moved outranks an order that was merely placed.
+    #
+    # `ruled` used to catch this and say "placed while you were away", which is
+    # wrong twice over: the reader was standing there paying, and an order is
+    # not a payment — a distinction this codebase insists on everywhere else and
+    # had no screen for.
+    paid = settlements[-1] if settlements else None
+    if paid and datetime.fromisoformat(paid["ts"]) >= now - NEWS_WINDOW:
+        grant = GRANTS.get(paid.get("grant_id") or "")
+        amount = f"₹{grant.amount_paise / 100:,.0f}" if grant else "your order"
+        return HomeState(
+            "paid",
+            f"Paid — {amount}. It is on its way.",
+            f"Reference {paid.get('razorpay_payment_id', '—')}. The signature was "
+            "checked before this was written down, and the chain covers it.",
+            ("view_basket", "verify_chain"),
+            grant_id=grant.grant_id if grant else None,
         )
 
     # An order that just happened outranks one that has not. It is the newer
@@ -1528,7 +1551,20 @@ def home() -> dict:
     except Exception:
         intact = False
     decision = current.decision
-    if decision and decision.get("cart_id"):
+    if current.state == "paid" and current.grant_id:
+        # From the grant's own snapshot: the basket that was paid for, which is
+        # what a receipt is about.
+        grant = GRANTS.get(current.grant_id)
+        if grant:
+            decision = {
+                "verdict": Verdict.ALLOW.value,
+                "items": grant.items,
+                "total_paise": grant.amount_paise,
+                "reasons": [],
+                "idempotency_key": "",
+                "reason_code": "ok.in_policy",
+            }
+    elif decision and decision.get("cart_id"):
         # The same lines the thread renders, so a basket looks like itself
         # wherever it appears — and so an escalation can show *which* two items
         # rather than only counting them.

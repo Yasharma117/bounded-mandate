@@ -528,10 +528,20 @@ struct CardCopyTests {
 
     @Test func nothingOnTheHomeScreenReadsLikeAnIdentifier() throws {
         for state in ["at_rest", "preflight", "ruled", "escalated", "refused",
-                      "clarify", "halted", "grant_live"] {
+                      "clarify", "halted", "grant_live", "paid"] {
             let out = try home(state)
             for line in [out.headline, out.detail, out.chip] + out.actions.map(\.label) {
-                #expect(!line.contains("_"), "\(state): \(line) reads like a symbol")
+                // Razorpay's own references carry underscores — `pay_TVjd…`,
+                // `order_TUWI…` — and those are shown on purpose: they are the
+                // thing a person can quote back to support. What must never
+                // reach the screen is *our* machine names, the reason codes and
+                // state ids the ledger stores.
+                let words = line.split(separator: " ").filter {
+                    !$0.hasPrefix("pay_") && !$0.hasPrefix("order_") && !$0.hasPrefix("grant_")
+                }
+                for word in words {
+                    #expect(!word.contains("_"), "\(state): \(word) reads like a symbol")
+                }
             }
         }
     }

@@ -54,6 +54,7 @@ CHIPS: dict[str, str] = {
     "at_rest": "Running",
     "preflight": "On track",
     "ruled": "Ordered",
+    "paid": "Paid",
     "needs_you": "Needs you",
     "grant_live": "Approved",
 }

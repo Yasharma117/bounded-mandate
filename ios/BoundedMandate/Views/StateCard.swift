@@ -179,6 +179,7 @@ struct StateCard: View {
         case "at_rest": "checkmark.shield.fill"
         case "preflight": "clock.fill"
         case "ruled": "checkmark.seal.fill"
+        case "paid": "shippingbox.fill"
         case "grant_live": "hourglass"
         default: home.decision?.verdict.symbol ?? "exclamationmark.triangle.fill"
         }
