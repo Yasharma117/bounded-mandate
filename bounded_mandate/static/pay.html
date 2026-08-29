@@ -65,6 +65,7 @@
     <row><span>Card</span><span id="tc">4100 2800 0000 1007</span></row>
     <row><span>Expiry / CVV</span><span>any future date · any 3 digits</span></row>
     <row><span>OTP</span><span>any 4–10 digits succeeds</span></row>
+    <row><span>Saved card</span><span id="saved">none yet</span></row>
     <p class="fine">Razorpay's own India test card. Tick <b>save this card</b> and the
       next approval skips straight past it — Standard Checkout runs the CVV-less flow
       on Visa, Mastercard and Amex. Test-mode tokens last 3 days.</p>
@@ -109,6 +110,10 @@ async function load() {
   // Shown only against a test key, so the demo does not need a second screen
   // open to find out what to type. `rzp_test_` is Razorpay's own prefix.
   $("testcard").hidden = !(d.key_id || "").startsWith("rzp_test_");
+  // What Checkout will actually offer. A card can be tokenised, listed against
+  // the customer, and still carry `status: failed` — in which case Checkout
+  // shows an empty form and nothing says why.
+  $("saved").textContent = d.saved_card || "none Checkout will offer";
   $("fine").textContent =
     "Save the card and the next approval is a single tap — no CVV on Visa, Mastercard "
     + "or Amex, and the OTP autofills. A standing mandate skips this screen entirely.";

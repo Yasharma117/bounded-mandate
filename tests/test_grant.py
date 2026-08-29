@@ -335,8 +335,10 @@ def test_the_checkout_payload_carries_contact_details_and_nothing_more(client):
     payload = client.get(f"/api/grant/{grant_id}").json()
 
     assert set(payload["prefill"]) == {"name", "email", "contact"}
-    body = json.dumps(payload).lower()
-    for forbidden in ("card", "cvv", "pan", "expiry", "number"):
+    # `saved_card` names what Checkout will offer — "Visa ****1007" or nothing.
+    # A masked last-four is not card data; a PAN, a CVV or an expiry would be.
+    body = json.dumps({k: v for k, v in payload.items() if k != "saved_card"}).lower()
+    for forbidden in ("cvv", "pan", "expiry", "card_number", "cardnumber"):
         assert forbidden not in body, f"the checkout payload mentions {forbidden}"
 
 

@@ -598,6 +598,16 @@ def grant_once(body: GrantRequest) -> dict:
     }
 
 
+def _saved_card(customer_id: str | None) -> str | None:
+    """Never fatal: a checkout that cannot answer this still has to open."""
+    if not customer_id:
+        return None
+    try:
+        return gateway().saved_card(customer_id)
+    except HTTPException:
+        return None
+
+
 @app.get("/api/grant/{grant_id}")
 def read_grant(grant_id: str) -> dict:
     """What the checkout page needs, and no more than that."""
@@ -635,6 +645,10 @@ def read_grant(grant_id: str) -> dict:
         # list and cannot be — see `create_charge_order`.
         "prefill": {k: v for k, v in DEMO_CUSTOMER.items() if k in ("name", "email", "contact")},
         "customer_id": grant.customer_id or _CUSTOMER,
+        # What Checkout will actually offer, asked of the endpoint Checkout
+        # itself reads. `None` means a full card, whatever the Customers API
+        # says it holds.
+        "saved_card": _saved_card(grant.customer_id or _CUSTOMER),
         "payment_id": grant.payment_id,
         # From the grant's own snapshot, so the page shows what was approved
         # rather than whatever the shop happens to hold now.

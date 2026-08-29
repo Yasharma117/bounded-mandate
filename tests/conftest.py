@@ -92,6 +92,12 @@ class FakeGateway:
 
     key_id = "rzp_test_key"
 
+    def saved_card(self, _customer_id):
+        """What Checkout would offer. `None` is the honest default: a token can
+        exist on a customer and still be `status: failed`, which is exactly the
+        state this reports."""
+        return None
+
     def create_charge_order(self, *, amount_paise, idempotency_key, description, customer_id=None):
         self.charged.append(amount_paise)
         self.customers.append(customer_id)

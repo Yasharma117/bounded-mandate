@@ -242,6 +242,35 @@ class RazorpayGateway:
         except Exception as exc:
             raise _wrap(exc, "charge failed") from exc
 
+    def saved_card(self, customer_id: str) -> str | None:
+        """What Checkout will actually offer this customer, or `None`.
+
+        Asked of `/v1/preferences`, which is the call Checkout itself makes on
+        load — so this reports what the reader will see rather than what the
+        Customers API holds. The two disagree, and the disagreement is the whole
+        reason this exists: a card can be tokenised, listed against the customer,
+        and still carry `status: failed`, in which case Checkout offers nothing
+        and the screen looks broken for no visible reason.
+
+        Authenticated with `key_id` alone, the way Checkout authenticates.
+        """
+        import httpx2 as httpx
+
+        try:
+            answer = httpx.get(
+                "https://api.razorpay.com/v1/preferences",
+                params={"key_id": self.key_id, "customer_id": customer_id},
+                timeout=15.0,
+            ).json()
+        except Exception:
+            return None
+        tokens = ((answer.get("customer") or {}).get("tokens") or {}).get("items") or []
+        for token in tokens:
+            card = token.get("card") or {}
+            if card.get("last4"):
+                return f"{card.get('network', 'Card')} ****{card['last4']}"
+        return None
+
     # --- webhooks ------------------------------------------------------------
 
     def verify_webhook(self, body: bytes, signature: str, secret: str) -> None:
