@@ -39,6 +39,7 @@
 		9D05E8A565CBB7823A87B82A /* DecisionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 309C0A10C6372B326D0D6D3F /* DecisionCard.swift */; };
 		9E4163CA007B7EC3036FDF25 /* home_at_rest.json in Resources */ = {isa = PBXBuildFile; fileRef = 207DF571292C7E04D37A3559 /* home_at_rest.json */; };
 		A076D5C01A07E48990CC13E9 /* decision_live.json in Resources */ = {isa = PBXBuildFile; fileRef = FFC7C64DB646CF41394D92D3 /* decision_live.json */; };
+		A9B206E52ED4D6D94F33B200 /* ListDraftCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331423EC6994EAC1430CE747 /* ListDraftCard.swift */; };
 		ADE569289D879E5AE7AF9EE8 /* VoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08994E31838B4504D06AEDCB /* VoiceSession.swift */; };
 		B3CCBE7DE4AF8D06C7DF3D2D /* Surfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FE80D8D802D5B02E2DF3C0 /* Surfaces.swift */; };
 		B80B197A1F70F4625A02EC9D /* home_ruled.json in Resources */ = {isa = PBXBuildFile; fileRef = 4AE916CDA0C1513FDF5A4A2C /* home_ruled.json */; };
@@ -85,6 +86,7 @@
 		26FCAD97A2F22D708729DFC4 /* BasketSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BasketSheet.swift; sourceTree = "<group>"; };
 		278C11735D563466BFE3313F /* AddressSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddressSheet.swift; sourceTree = "<group>"; };
 		309C0A10C6372B326D0D6D3F /* DecisionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecisionCard.swift; sourceTree = "<group>"; };
+		331423EC6994EAC1430CE747 /* ListDraftCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDraftCard.swift; sourceTree = "<group>"; };
 		3C858017986FE5EA163470CF /* DeliveryAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeliveryAddress.swift; sourceTree = "<group>"; };
 		3C85C718687F97BF21E8BF88 /* home_paid.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = home_paid.json; sourceTree = "<group>"; };
 		423CA0BC96E08241A6551777 /* home_refused.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = home_refused.json; sourceTree = "<group>"; };
@@ -153,6 +155,7 @@
 				309C0A10C6372B326D0D6D3F /* DecisionCard.swift */,
 				C748AAD1C1085254E1F426F7 /* HomeView.swift */,
 				BCDF39B1D222BAA0CA0D7F2B /* LedgerSheet.swift */,
+				331423EC6994EAC1430CE747 /* ListDraftCard.swift */,
 				5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */,
 				B134C0D0247EF8BD2C49D1E9 /* MandateCard.swift */,
 				1EA33E9B6CFE9D623F014033 /* OffersCard.swift */,
@@ -382,6 +385,7 @@
 				2391E97D9D4D6B70792CB48E /* HomeView.swift in Sources */,
 				32B4AB9DAC0F04CA0B11E7DC /* Ledger.swift in Sources */,
 				F810845A164E23127A8269B0 /* LedgerSheet.swift in Sources */,
+				A9B206E52ED4D6D94F33B200 /* ListDraftCard.swift in Sources */,
 				22254A44218ED4D318B4DCD6 /* ListSheet.swift in Sources */,
 				2EAA76FA814C1B7745FC0E41 /* MandateCard.swift in Sources */,
 				079ADA24D717E9A4B7C0DE1A /* Motion.swift in Sources */,

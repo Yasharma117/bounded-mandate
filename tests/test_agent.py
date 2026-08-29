@@ -49,10 +49,18 @@ def build(client, policies, ledger):
 # --- the asymmetry -----------------------------------------------------------
 
 
-def test_the_agent_holds_exactly_four_tools_and_none_touch_the_rail():
-    """It can read, shop and ask. It cannot pay, and it cannot see its policy."""
+def test_the_agent_holds_five_tools_and_none_touch_the_rail():
+    """It can read, draft, shop and ask. It cannot pay, cannot see its policy,
+    and cannot store anything — `propose_list` writes a list *out*, and only
+    the account holder can turn that into one."""
     names = {t["function"]["name"] for t in TOOLS}
-    assert names == {"read_shopping_list", "search_catalog", "create_cart", "request_charge"}
+    assert names == {
+        "read_shopping_list",
+        "propose_list",
+        "search_catalog",
+        "create_cart",
+        "request_charge",
+    }
     blob = json.dumps(TOOLS).lower()
     assert "razorpay" not in blob and "policy" not in blob and "mandate" not in blob
 
@@ -64,14 +72,39 @@ def test_no_tool_can_write_the_shopping_list():
 
     So the absence of a write tool is a security property, not an oversight.
     """
-    for tool in TOOLS:
-        function = tool["function"]
-        if function["name"] == "read_shopping_list":
-            assert function["parameters"].get("properties") == {}, "read takes no arguments"
-        else:
-            assert "list" not in function["name"]
+    read = next(t["function"] for t in TOOLS if t["function"]["name"] == "read_shopping_list")
+    assert read["parameters"].get("properties") == {}, "read takes no arguments"
+
     writes = {"write_shopping_list", "edit_shopping_list", "add_to_list", "set_shopping_list"}
     assert writes.isdisjoint({t["function"]["name"] for t in TOOLS})
+
+    # `propose_list` writes one *out*, for the account holder to approve. That
+    # is a proposal, not a write — the same shape as `request_charge`, which
+    # asks the engine rather than moving money. The behavioural check is in
+    # `test_drafting_a_list_changes_nothing` below; naming alone proves little.
+
+
+def test_drafting_a_list_changes_nothing(policies, ledger):
+    """What `propose_list` may do, stated as what it leaves behind: nothing."""
+    agent = build(scripted((None, "done")), policies, ledger)
+    before = agent.shopping_list.item_names
+    run = AgentRun("x")
+
+    out = agent._dispatch(
+        run, "propose_list", {"name": "Snacks", "item_names": ["Blue Lays x3"], "every_days": 7}
+    )
+
+    assert out["drafted"] is True
+    assert run.draft.item_names == ("Blue Lays x3",)
+    assert run.draft.every_days == 7
+    # The user's own list is untouched, which is the whole point.
+    assert agent.shopping_list.item_names == before
+
+
+def test_a_draft_refuses_to_be_empty(policies, ledger):
+    agent = build(scripted((None, "done")), policies, ledger)
+    out = agent._dispatch(AgentRun("x"), "propose_list", {"name": "Snacks", "item_names": []})
+    assert "error" in out
 
 
 def test_the_agent_cannot_reach_the_list_through_dispatch(policies, ledger):

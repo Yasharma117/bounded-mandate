@@ -257,10 +257,59 @@ class TestProvenanceHolds:
 
 class TestAuthorityCannotBeWidened:
     def test_no_agent_tool_can_write_the_list(self):
+        """The property is that nothing the agent calls *writes* a list — not
+        that no tool has the word in its name.
+
+        `propose_list` writes one out for the account holder to approve, which
+        is the same shape as everything else here: it proposes, somebody else
+        decides. Confirming is an ordinary `POST /api/lists` that no tool
+        reaches. So the guard is behavioural now, and the two below check it by
+        running the thing rather than reading its name.
+        """
         from bounded_mandate.agent import TOOLS
 
         names = {t["function"]["name"] for t in TOOLS}
-        assert not [n for n in names if n != "read_shopping_list" and "list" in n]
+        assert names == {
+            "read_shopping_list",
+            "propose_list",
+            "search_catalog",
+            "create_cart",
+            "request_charge",
+        }
+
+    def test_drafting_a_list_does_not_create_one(self, client):
+        before = {k: v.item_names for k, v in web.LISTS.items()}
+        from bounded_mandate.agent import AgentRun, BuyerAgent
+
+        agent = BuyerAgent(
+            marketplace=Marketplace(),
+            policies={},
+            ledger=web.LEDGER,
+            mandate_id="mdt_1",
+            delivery_address=HOME,
+            client=object(),
+        )
+        run = AgentRun("x")
+        out = agent._dispatch(
+            run, "propose_list", {"name": "Snacks", "item_names": ["Blue Lays x3"]}
+        )
+
+        assert out["drafted"] is True
+        assert run.draft.name == "Snacks"
+        # Nothing stored, scheduled, or orderable against.
+        assert {k: v.item_names for k, v in web.LISTS.items()} == before
+        assert "Snacks" not in {v.name for v in web.LISTS.values()}
+
+    def test_only_the_route_the_agent_cannot_reach_creates_one(self, client):
+        """Approving a draft is an ordinary user action, and the reason it is
+        safe is that no tool can perform it."""
+        import inspect
+
+        from bounded_mandate.agent import BuyerAgent
+
+        source = inspect.getsource(BuyerAgent)
+        for forbidden in ("api/lists", "LISTS[", "with_item", "without("):
+            assert forbidden not in source, f"the agent reaches {forbidden}"
 
     def test_no_agent_tool_asserts_a_category(self):
         from bounded_mandate.agent import TOOLS

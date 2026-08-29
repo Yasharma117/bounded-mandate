@@ -274,10 +274,23 @@ def test_a_user_can_edit_their_list_and_it_reprices(client):
     assert client.get("/api/list/usual").json()["total_paise"] == 53_000
 
 
-def test_the_list_refuses_items_no_shop_stocks(client):
-    response = client.put("/api/list/usual", json={"item_names": ["Ferrari"]})
-    assert response.status_code == 400
-    assert client.get("/api/list/usual").json()["total_paise"] == 185_000
+def test_a_list_may_hold_what_the_shop_does_not_stock(client):
+    """This used to be a 400, which was the mock leaking into the user's own
+    document — refusing a line because our catalog is seventeen items long.
+
+    The list is their record of what they want. What the shop stocks is
+    reported on every row, never enforced, and the engine still rules on the
+    cart that actually gets built.
+    """
+    response = client.put(
+        "/api/list/usual", json={"item_names": ["Brown bread", "Epigamia yogurt x6"]}
+    )
+
+    assert response.status_code == 200
+    rows = {i["name"]: i for i in response.json()["items"]}
+    assert rows["Brown bread"]["price_paise"] == 5_500
+    assert rows["Epigamia yogurt x6"]["price_paise"] is None
+    assert response.json()["unstocked"] == ["Epigamia yogurt x6"]
 
 
 def test_an_unknown_list_is_a_404_both_ways(client):
@@ -464,9 +477,21 @@ def test_a_one_time_list_can_be_created_and_reads_as_one_off(client):
     assert len(client.get("/api/lists").json()["lists"]) >= 3
 
 
-def test_creating_a_list_refuses_items_no_shop_stocks(client):
-    response = client.post("/api/lists", json={"name": "Dream", "item_names": ["Ferrari"]})
-    assert response.status_code == 400
+def test_a_new_list_may_too(client):
+    """Which is what makes a drafted list worth approving: the agent writes down
+    what you actually said, not what our catalog happens to contain."""
+    response = client.post(
+        "/api/lists",
+        json={
+            "name": "Weekly snacks",
+            "item_names": ["Epigamia yogurt x6", "Blue Lays x3"],
+            "every_days": 7,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["unstocked"] == ["Epigamia yogurt x6", "Blue Lays x3"]
+    assert response.json()["schedule"] == "Every 7 days"
 
 
 def test_two_lists_with_the_same_name_get_their_own_ids(client):

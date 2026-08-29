@@ -708,9 +708,31 @@ def run_agent(body: Instruction) -> dict:
     cart = next((s for s in run.steps if s.tool == "create_cart"), None)
     items = int(cart.result.get("item_count") or 0) if cart else 0
 
+    # The draft, with the shop's answer on each line. A list the merchant does
+    # not stock is a list that will escalate the first time it runs, and the
+    # place to learn that is here rather than three days later.
+    draft = None
+    if run.draft is not None:
+        unstocked = set(_unstocked(list(run.draft.item_names)))
+        catalog = {} if is_live() else MARKETPLACE[MERCHANT_NAME].catalog
+        draft = {
+            "name": run.draft.name,
+            "every_days": run.draft.every_days,
+            "items": [
+                {
+                    "name": name,
+                    "stocked": name not in unstocked,
+                    "price_paise": catalog[name].price_paise if name in catalog else None,
+                    "image_url": catalog[name].image_url if name in catalog else "",
+                }
+                for name in run.draft.item_names
+            ],
+        }
+
     return {
         "said": run.said,
         "steps": steps,
+        "draft": draft,
         "decision": (
             _rendered(run.decision, claimed_total_paise=claimed, cart_items=items)
             if run.decision
@@ -1155,9 +1177,13 @@ def create_list(body: NewList) -> dict:
         kind = ListKind(body.kind)
     except ValueError as exc:
         raise HTTPException(400, "kind must be `standing` or `once`") from exc
-    unknown = _unstocked(body.item_names)
-    if unknown:
-        raise HTTPException(400, f"not stocked: {', '.join(unknown)}")
+    # A line the shop does not stock is not a reason to refuse the list.
+    #
+    # The list is the user's own record of what they want, and refusing to store
+    # "Epigamia blueberry yogurt" because our catalog is seventeen items long is
+    # the mock's limitation leaking into their document. It already travels back
+    # marked `unstocked` on every row, which is the honest way to say it — and
+    # the engine still rules on the cart that actually gets built.
 
     list_id = _fresh_id(body.name)
     LISTS[list_id] = ShoppingList(
@@ -1234,9 +1260,8 @@ def write_list(list_id: str, body: ListEdit) -> dict:
     shopping = LISTS.get(list_id)
     if shopping is None:
         raise HTTPException(404, "no such list")
-    unknown = _unstocked(body.item_names)
-    if unknown:
-        raise HTTPException(400, f"not stocked: {', '.join(unknown)}")
+    # Same as above: what the shop stocks is reported, never enforced, on a
+    # document that belongs to the user.
     supplied = body.categories or {}
     # `fees` is allowed by every policy, so letting it be assigned to goods
     # would hand out a category that clears the scope check on anything.

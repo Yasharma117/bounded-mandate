@@ -212,6 +212,48 @@ struct Decision: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// A shopping list the agent wrote out for you to approve.
+///
+/// Not a list. Nothing is stored, scheduled or ordered against until you
+/// confirm it — and confirming is an ordinary list write that no agent tool can
+/// reach. The agent proposes; you decide. Same shape as everything else here.
+struct ListDraft: Codable, Hashable, Sendable {
+    let name: String
+    let everyDays: Int?
+    let items: [Line]
+
+    struct Line: Codable, Hashable, Sendable, Identifiable {
+        let name: String
+        /// Whether the shop the rule allows actually sells it. A list of things
+        /// nobody stocks escalates the first time it runs, and here is a better
+        /// place to find that out than three days later.
+        let stocked: Bool
+        let pricePaise: Int?
+        let imageURL: String?
+
+        var id: String { name }
+
+        enum CodingKeys: String, CodingKey {
+            case name, stocked
+            case pricePaise = "price_paise"
+            case imageURL = "image_url"
+        }
+    }
+
+    var stockedCount: Int { items.filter(\.stocked).count }
+    var totalPaise: Int { items.compactMap(\.pricePaise).reduce(0, +) }
+
+    var schedule: String {
+        guard let everyDays else { return "Only when you ask" }
+        return everyDays == 1 ? "Every day" : "Every \(everyDays) days"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, items
+        case everyDays = "every_days"
+    }
+}
+
 /// One tool the agent reached for, and what came back.
 struct AgentStep: Codable, Sendable {
     let tool: String
@@ -235,6 +277,8 @@ struct AgentTurn: Codable, Sendable {
     let said: String
     let decision: Decision?
     let steps: [AgentStep]
+    /// What it wrote out for you to look at. Never what it did.
+    let draft: ListDraft?
 
     /// Cards this turn earned, in the order they were earned.
     ///
@@ -252,6 +296,7 @@ struct AgentTurn: Codable, Sendable {
                 cards.append(.offers(product: product, offers: group))
             }
         }
+        if let draft { cards.append(.drafted(draft)) }
         if let decision { cards.append(.decision(decision)) }
         return cards
     }
@@ -259,11 +304,13 @@ struct AgentTurn: Codable, Sendable {
     enum Surfaced: Identifiable {
         case offers(product: String, offers: [Offer])
         case decision(Decision)
+        case drafted(ListDraft)
 
         var id: String {
             switch self {
             case .offers(let product, _): "offers-" + product
             case .decision(let decision): "decision-" + decision.id
+            case .drafted(let draft): "draft-" + draft.name
             }
         }
     }
@@ -273,9 +320,10 @@ struct AgentTurn: Codable, Sendable {
         said = try box.decode(String.self, forKey: .said)
         decision = try box.decodeIfPresent(Decision.self, forKey: .decision)
         steps = try box.decodeIfPresent([AgentStep].self, forKey: .steps) ?? []
+        draft = try box.decodeIfPresent(ListDraft.self, forKey: .draft)
     }
 
-    enum CodingKeys: String, CodingKey { case said, decision, steps }
+    enum CodingKeys: String, CodingKey { case said, decision, steps, draft }
 }
 
 /// "1 item", not "1 items". Small, but the card is the product's voice and a

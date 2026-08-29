@@ -59,6 +59,11 @@ Do not build a cart. Someone saying "hello" is not someone asking you to spend
 their money, and ordering unbidden is not made acceptable by the order landing
 inside their limits — being in policy is not the same as being wanted.
 
+If they are describing things they want to buy regularly rather than asking you
+to buy now, call `propose_list` and write it out for them. You cannot create or
+change a list — only they can, by approving what you wrote — so draft it and say
+you have, rather than telling them to go and do it themselves.
+
 When you ARE asked to buy, work in this order:
 1. `read_shopping_list` to see what the account holder actually wants. This is
    their list, not yours. You cannot change it.
@@ -176,6 +181,32 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "propose_list",
+            "description": (
+                "Write out a shopping list for the account holder to look at and "
+                "approve. This does NOT create or change anything — only they can "
+                "do that, and they do it by confirming what you wrote. Use it when "
+                "they describe things they want to buy, especially on a repeating "
+                "schedule. Put quantities in the item name, e.g. 'Epigamia "
+                "blueberry yogurt x6'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "What to call the list"},
+                    "item_names": {"type": "array", "items": {"type": "string"}},
+                    "every_days": {
+                        "type": "integer",
+                        "description": "How often it should repeat. Omit for a one-off.",
+                    },
+                },
+                "required": ["name", "item_names"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "request_charge",
             "description": (
                 "Ask the authorisation engine to charge a cart. This is the only way "
@@ -201,12 +232,34 @@ class Step:
     result: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class Draft:
+    """A shopping list the agent has *written out*, for the user to approve.
+
+    Not a list. Nothing here is stored, scheduled or ordered against until the
+    account holder confirms it, and confirming is an ordinary `POST /api/lists`
+    that no agent tool can reach.
+
+    This is the same shape as everything else here: the agent proposes, someone
+    else decides. Giving it a write tool instead would hand it the one thing the
+    architecture withholds — an agent that can redefine "my usual groceries" can
+    then order the new definition entirely within policy, an escalation that
+    never trips a bound.
+    """
+
+    name: str
+    item_names: tuple[str, ...]
+    every_days: int | None = None
+
+
 @dataclass
 class AgentRun:
     instruction: str
     steps: list[Step] = field(default_factory=list)
     decision: Decision | None = None
     said: str = ""
+    #: What it wrote out for you to look at. Never what it did.
+    draft: Draft | None = None
 
 
 class BuyerAgent:
@@ -245,6 +298,26 @@ class BuyerAgent:
         return {
             "name": self.shopping_list.name,
             "item_names": list(self.shopping_list.item_names),
+        }
+
+    def _propose_list(self, run: AgentRun, args: dict[str, Any]) -> dict[str, Any]:
+        """Write one out. Storing it is somebody else's decision."""
+        names = args.get("item_names") or []
+        if not isinstance(names, list) or not names:
+            return {"error": "item_names must be a non-empty list of names"}
+        every = _paise(args.get("every_days")) if args.get("every_days") is not None else None
+        run.draft = Draft(
+            name=str(args.get("name") or "New list").strip()[:60],
+            item_names=tuple(str(n).strip()[:120] for n in names if str(n).strip()),
+            every_days=every if every and 0 < every <= 365 else None,
+        )
+        return {
+            "drafted": True,
+            "name": run.draft.name,
+            "item_names": list(run.draft.item_names),
+            "every_days": run.draft.every_days,
+            # Said back to the model so it does not claim to have created one.
+            "note": "Shown to the account holder for approval. Not saved yet.",
         }
 
     def _search_catalog(self, query: str) -> dict[str, Any]:
@@ -336,6 +409,8 @@ class BuyerAgent:
     def _dispatch(self, run: AgentRun, name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "read_shopping_list":
             return self._read_shopping_list()
+        if name == "propose_list":
+            return self._propose_list(run, args)
         if name == "search_catalog":
             return self._search_catalog(str(args.get("query") or ""))
         if name == "create_cart":

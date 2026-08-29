@@ -25,12 +25,14 @@ enum Message: Identifiable {
     case said(id: String, from: Bubble.Author, text: String)
     case ruled(id: String, decision: Decision)
     case priced(id: String, product: String, offers: [Offer])
+    case drafted(id: String, draft: ListDraft)
 
     var id: String {
         switch self {
         case .said(let id, _, _): id
         case .ruled(let id, _): id
         case .priced(let id, _, _): id
+        case .drafted(let id, _): id
         }
     }
 
@@ -43,6 +45,8 @@ enum Message: Identifiable {
                 out.append(.priced(id: "o-\(key)-\(product)", product: product, offers: offers))
             case .decision(let decision):
                 out.append(.ruled(id: "d-\(key)", decision: decision))
+            case .drafted(let draft):
+                out.append(.drafted(id: "l-\(key)-\(draft.name)", draft: draft))
             }
         }
         return out
@@ -391,6 +395,21 @@ struct ThreadView: View {
                 DecisionCard(decision: decision)
             case .priced(_, let product, let offers):
                 OffersCard(product: product, offers: offers)
+            case .drafted(_, let draft):
+                ListDraftCard(draft: draft) { accepted in
+                    // The confirmation, and the only thing that creates a list.
+                    // No agent tool reaches this — which is exactly why it is
+                    // safe to put one tap away.
+                    Task {
+                        _ = try? await Engine.createList(
+                            name: accepted.name,
+                            items: accepted.items.map(\.name),
+                            once: accepted.everyDays == nil,
+                            everyDays: accepted.everyDays,
+                            runOn: nil
+                        )
+                    }
+                }
             }
         }
         .arrives(reduceMotion, delay: thread.delays[message.id] ?? 0)
