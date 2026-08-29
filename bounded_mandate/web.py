@@ -165,13 +165,14 @@ def _settle(decision, cart_items: int) -> dict:
     return {"order_id": order_id, "key_id": gw.key_id}
 
 
-def _rendered(decision, *, claimed_total_paise: int, cart_items: int) -> dict:
-    # The cart the *engine fetched*, not the one the agent described. When a
-    # verdict says "2 items outside your scope", the reader should be able to
-    # see which two rather than take the sentence on trust.
-    cart = MARKETPLACE.fetch_cart(decision.cart_id)
-    policy = POLICIES.get(decision.mandate_id)
-    items = [
+def _cart_lines(cart, policy) -> list[dict]:
+    """One basket, as every card renders it.
+
+    Shared so the thread and the home screen cannot drift about what a line is —
+    the flags especially, since `off_scope` is the policy's judgement and two
+    surfaces computing it separately is two chances to disagree.
+    """
+    return [
         {
             "name": item.name,
             "price_paise": item.price_paise,
@@ -188,6 +189,14 @@ def _rendered(decision, *, claimed_total_paise: int, cart_items: int) -> dict:
         }
         for item in (cart.items if cart else ())
     ]
+
+
+def _rendered(decision, *, claimed_total_paise: int, cart_items: int) -> dict:
+    # The cart the *engine fetched*, not the one the agent described. When a
+    # verdict says "2 items outside your scope", the reader should be able to
+    # see which two rather than take the sentence on trust.
+    cart = MARKETPLACE.fetch_cart(decision.cart_id)
+    items = _cart_lines(cart, POLICIES.get(decision.mandate_id))
     settled = _settle(decision, cart_items)
     return {
         "items": items,
@@ -1278,6 +1287,17 @@ def home() -> dict:
         intact = True
     except Exception:
         intact = False
+    decision = current.decision
+    if decision and decision.get("cart_id"):
+        # The same lines the thread renders, so a basket looks like itself
+        # wherever it appears — and so an escalation can show *which* two items
+        # rather than only counting them.
+        cart = MARKETPLACE.fetch_cart(decision["cart_id"])
+        decision = {
+            **decision,
+            "items": _cart_lines(cart, POLICIES.get(decision.get("mandate_id"))),
+        }
+
     return {
         "rule": _rule_block(),
         "state": current.state,
@@ -1285,7 +1305,7 @@ def home() -> dict:
         "headline": current.headline,
         "detail": current.detail,
         "actions": [action(a) for a in current.actions],
-        "decision": current.decision,
+        "decision": decision,
         "grant_id": current.grant_id,
         "list_id": current.list_id,
         "lists": [_list_rows(s) for s in LISTS.values()],

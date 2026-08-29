@@ -57,6 +57,11 @@ struct StateCard: View {
                 }
                 .padding(18)
 
+                if let goods = home.decision?.goods, !goods.isEmpty {
+                    Divider().overlay(theme.borderSubtle)
+                    basket(goods)
+                }
+
                 if !home.actions.isEmpty {
                     Divider().overlay(theme.borderSubtle)
                     // Stacked, not a row. Three options side by side become
@@ -85,6 +90,51 @@ struct StateCard: View {
                 }
             }
         }
+    }
+
+    /// What is actually in it, with pictures.
+    ///
+    /// Horizontal rather than a list: the card lives on a home screen among
+    /// four other blocks, and twelve stacked rows would push everything below
+    /// it off the page. A strip shows the first few, says how many more, and —
+    /// with flagged lines sorted to the front — puts the two items that caused
+    /// the interruption where the eye lands first.
+    private func basket(_ goods: [CartLine]) -> some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(goods) { line in
+                    VStack(alignment: .leading, spacing: 6) {
+                        ZStack(alignment: .topTrailing) {
+                            ProductThumb(url: line.imageURL, side: 62)
+                            if line.flagged {
+                                Image(systemName: "exclamationmark.circle.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(tint)
+                                    .background(theme.bgSubtle, in: .circle)
+                                    .offset(x: 5, y: -5)
+                            }
+                        }
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(line.flagged ? tint : .clear, lineWidth: 1.5)
+                        )
+                        Text(line.name)
+                            .font(.system(size: 11))
+                            .foregroundStyle(line.flagged ? theme.textNormal : theme.textMuted)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Text(rupees(line.pricePaise))
+                            .font(.system(size: 11, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(line.flagged ? tint : theme.textSubtle)
+                    }
+                    .frame(width: 62)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+        }
+        .scrollIndicators(.hidden)
     }
 
     private var symbol: String {

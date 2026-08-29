@@ -62,9 +62,22 @@ struct LedgerDecision: Decodable, Hashable, Sendable {
     let idempotencyKey: String
     let cartID: String?
     let reasons: [Reason]
+    /// The basket the **engine fetched**, not the one the agent described.
+    /// Saying "₹1,850, inside your rule" without showing what it bought is
+    /// asking to be taken on trust, which is the one thing this product does
+    /// not do.
+    let items: [CartLine]
+
+    /// Flagged lines first — the two items that caused a refusal should not be
+    /// the two you have to scroll to.
+    var ordered: [CartLine] { items.filter(\.flagged) + items.filter { !$0.flagged } }
+
+    /// Fees are a charge on the delivery, not a thing anyone chose. They belong
+    /// in the total and not in a row of product pictures.
+    var goods: [CartLine] { ordered.filter { $0.category != "fees" } }
 
     enum CodingKeys: String, CodingKey {
-        case verdict, reasons
+        case verdict, reasons, items
         case reasonCode = "reason_code"
         case totalPaise = "total_paise"
         case idempotencyKey = "idempotency_key"
@@ -79,6 +92,7 @@ struct LedgerDecision: Decodable, Hashable, Sendable {
         idempotencyKey = try box.decodeIfPresent(String.self, forKey: .idempotencyKey) ?? ""
         cartID = try box.decodeIfPresent(String.self, forKey: .cartID)
         reasons = try box.decodeIfPresent([Reason].self, forKey: .reasons) ?? []
+        items = try box.decodeIfPresent([CartLine].self, forKey: .items) ?? []
     }
 }
 
