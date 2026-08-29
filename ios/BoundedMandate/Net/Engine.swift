@@ -60,6 +60,21 @@ enum Engine {
         let _: Ran = try await send("/api/lists/run-due", method: "POST")
     }
 
+    /// The audit trail, and whether the chain still verifies.
+    static func readLedger() async throws -> LedgerPage {
+        try await send("/api/ledger", method: "GET")
+    }
+
+    /// Replace a list, with categories the user assigned.
+    static func writeList(
+        _ listID: String, items: [String], categories: [String: String]
+    ) async throws -> ShoppingList {
+        try await send(
+            "/api/list/\(listID)", method: "PUT",
+            body: ["item_names": items, "categories": categories]
+        )
+    }
+
     /// One product in full, and the alternatives to it.
     static func product(_ name: String, merchant: String) async throws -> ProductDetail {
         let encode = { (s: String) in

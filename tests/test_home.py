@@ -184,3 +184,68 @@ def test_no_state_says_anything_that_reads_like_an_identifier(client):
     for line in seen:
         assert "_" not in line, f"{line!r} reads like a symbol"
         assert not re.search(r"\b\w+\.\w+\b", line), f"{line!r} reads like a dotted path"
+
+
+# --- every offered action has somewhere to go ---------------------------------
+#
+# They all used to open the chat thread, on the reasoning that the thread
+# already renders carts and reasons. It does — but "View rule" that lands you in
+# a conversation is not a view of the rule, and a button that does not do the
+# thing written on it is worse than no button.
+
+
+def test_every_action_the_engine_offers_has_a_route_behind_it(client):
+    """The app maps each action id to a destination or an effect. This pins the
+    server half: each one has something to call."""
+    routes = {r.path for r in web.app.routes}
+    behind = {
+        "view_rule": "/api/home",
+        "view_basket": "/api/home",
+        "see_attempt": "/api/ledger",
+        "verify_chain": "/api/ledger",
+        "approve_once": "/api/mandate/one-time",
+        "pause": "/api/list/{list_id}/schedule",
+        "resume": "/api/list/{list_id}/schedule",
+        "classify": "/api/list/{list_id}",
+        "leave_out": "/api/list/{list_id}",
+        "drop_flagged": "/api/list/{list_id}",
+        "reauthorise": "/api/addresses",
+        "cancel_basket": "/api/addresses",
+        "pay": "/pay",
+    }
+    for action, route in behind.items():
+        assert route in routes, f"{action} has nowhere to go: {route} is not a route"
+
+    # Every id the wording table can emit is accounted for above, so a new
+    # action cannot be added without deciding where it leads.
+    from bounded_mandate.wording import ACTIONS
+
+    undecided = set(ACTIONS) - set(behind) - {"not_now", "let_lapse"}
+    assert not undecided, f"actions with no destination decided: {undecided}"
+
+
+def test_a_list_edit_carries_the_users_own_categories(client):
+    """What `classify` does: the user's classification, which is the only one
+    the engine will take."""
+    out = client.put(
+        "/api/list/breakfast",
+        json={
+            "item_names": ["Toned milk 1L x2", "Eggs (12)", "Brown bread"],
+            "categories": {"Eggs (12)": "groceries"},
+        },
+    )
+
+    assert out.status_code == 200
+    assert web.LISTS["breakfast"].category_of("Eggs (12)") == "groceries"
+
+
+def test_the_cap_meter_measures_the_list_against_the_cap(client):
+    """The bar under each list. It shipped unlabelled, which made it decoration
+    — the first question anybody asked was what it measured."""
+    row = client.get("/api/list/usual").json()
+
+    assert row["total_paise"] == 185_000
+    assert row["cap_paise"] == 200_000
+    # 92.5% of the cap, which is what the bar is that full of, and what
+    # "₹150 under your cap" says out loud.
+    assert row["cap_paise"] - row["total_paise"] == 15_000

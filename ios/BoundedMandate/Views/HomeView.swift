@@ -45,6 +45,10 @@ struct HomeView: View {
     @State private var showingThread = false
     @State private var openVoice = false
     @State private var looking: CartLine?
+    @State private var showingLedger = false
+    @State private var showingRule = false
+    @State private var showingBasket = false
+    @State private var busy = false
 
     var body: some View {
         NavigationStack {
@@ -95,6 +99,15 @@ struct HomeView: View {
             // decided on, not a list the user is composing.
             .sheet(item: $looking) { line in
                 ProductSheet(name: line.name, merchant: store.home?.rule.merchants.first ?? "instamart")
+            }
+            .sheet(isPresented: $showingLedger) { LedgerSheet() }
+            .sheet(isPresented: $showingRule) {
+                if let home = store.home { RuleSheet(rule: home.rule, lists: home.lists) }
+            }
+            .sheet(isPresented: $showingBasket) {
+                if let decision = store.home?.decision {
+                    BasketSheet(decision: decision) { line in looking = line }
+                }
             }
             .sheet(isPresented: $showingAddress) { AddressSheet() }
             .fullScreenCover(isPresented: $showingThread) {
@@ -191,9 +204,12 @@ struct HomeView: View {
                             .font(.system(size: 20, weight: .semibold))
                             .monospacedDigit()
                             .foregroundStyle(theme.textNormal)
-                        // How much of the cap this list would spend. A number
-                        // beside a number is arithmetic the reader has to do;
-                        // a bar is the answer.
+                        // How much of the per-order cap this list would spend.
+                        //
+                        // It shipped unlabelled, which made it decoration —
+                        // the first question anyone asked was what it measured.
+                        // A meter that needs explaining is not doing its job,
+                        // so the sentence under it says what the bar says.
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 Capsule().fill(theme.borderSubtle)
@@ -203,8 +219,16 @@ struct HomeView: View {
                             }
                         }
                         .frame(height: 3)
+                        Text(
+                            list.overCap
+                                ? "\(rupees(-list.headroomPaise)) over your cap"
+                                : "\(rupees(list.headroomPaise)) under your cap"
+                        )
+                        .font(.system(size: 11))
+                        .foregroundStyle(list.overCap ? theme.notice : theme.textMuted)
+                        .lineLimit(1)
                         Text(list.schedule)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundStyle(theme.textMuted)
                             .lineLimit(1)
                     }
@@ -223,7 +247,7 @@ struct HomeView: View {
             verb("play.fill", "Run now") { Task { await runDue() } }
             verb("list.bullet.rectangle", "Lists") { showingList = true }
             verb("mappin.and.ellipse", "Where") { showingAddress = true }
-            verb("checkmark.seal", "Ledger") { showingThread = true }
+            verb("checkmark.seal", "Ledger") { showingLedger = true }
         }
     }
 
@@ -345,15 +369,32 @@ struct HomeView: View {
 
     // MARK: - acting on what the card offered
 
+    /// Every offered action goes where it says it goes.
+    ///
+    /// All of these used to open the chat thread, on the reasoning that the
+    /// thread already renders carts and reasons. It does — but "View rule" that
+    /// lands you in a conversation is not a view of the rule, and a button that
+    /// does not do the thing on it is worse than no button.
     private func take(_ act: HomeAction, _ home: Home) {
         switch act.id {
-        case "view_rule", "view_basket", "see_attempt", "verify_chain", "drop_flagged",
-             "classify", "leave_out", "approve_once":
-            // Everything that needs the cart, the reasons or a conversation
-            // belongs in the thread, which already renders all three.
-            showingThread = true
+        case "view_rule":
+            showingRule = true
+        case "view_basket":
+            // A decision has a basket of its own; before one exists, the thing
+            // about to go out is a list.
+            if home.decision != nil { showingBasket = true } else { showingList = true }
+        case "see_attempt", "verify_chain":
+            // Verifying *is* opening the ledger — the chain check is the first
+            // thing on it, re-run on every read.
+            showingLedger = true
+        case "approve_once":
+            Task { await approveOnce(home) }
         case "pause", "resume":
-            showingList = true
+            Task { await setPaused(act.id == "pause", home) }
+        case "classify":
+            Task { await classifyFlagged(home) }
+        case "leave_out", "drop_flagged":
+            Task { await dropFlagged(home) }
         case "reauthorise", "cancel_basket":
             showingAddress = true
         case "not_now", "let_lapse":
@@ -365,6 +406,77 @@ struct HomeView: View {
         default:
             showingThread = true
         }
+    }
+
+    // MARK: - actions that act
+
+    /// Mint a one-time grant for this basket and open its checkout.
+    ///
+    /// The whole S3 flow, from a button that used to open a chat window.
+    private func approveOnce(_ home: Home) async {
+        guard let cartID = home.decision?.cartID, !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let granted = try await Engine.grantOneTime(cartID: cartID)
+            if let path = granted.payPath, let url = Engine.url(forPath: path) {
+                openURL(url)
+            }
+        } catch {
+            // A grant refused on the delivery address is recorded as a HALTED
+            // event, so reloading surfaces the halt rather than swallowing it.
+        }
+        await store.load()
+    }
+
+    private func setPaused(_ paused: Bool, _ home: Home) async {
+        guard let listID = home.listID ?? home.lists.first?.listID else {
+            showingList = true
+            return
+        }
+        _ = try? await Engine.setSchedule(listID, paused: paused)
+        await store.load()
+    }
+
+    /// Which of the user's lists holds this line.
+    ///
+    /// Resolved here rather than guessed at server-side: a basket can come from
+    /// a list run or from a one-off proposal, and editing "the list" when there
+    /// isn't one would be an edit nobody asked for. No match means the list
+    /// sheet opens instead of something silently changing.
+    private func listHolding(_ name: String, _ home: Home) -> ShoppingList? {
+        home.lists.first { $0.items.contains { $0.name == name } }
+    }
+
+    private func dropFlagged(_ home: Home) async {
+        let flagged = (home.decision?.items ?? []).filter(\.flagged).map(\.name)
+        guard !flagged.isEmpty, let list = flagged.compactMap({ listHolding($0, home) }).first
+        else {
+            showingList = true
+            return
+        }
+        let kept = list.items.map(\.name).filter { !flagged.contains($0) }
+        _ = try? await Engine.writeList(list.listID, items: kept)
+        await store.dismiss()
+    }
+
+    private func classifyFlagged(_ home: Home) async {
+        let unknown = (home.decision?.items ?? []).filter(\.unclassified).map(\.name)
+        guard !unknown.isEmpty, let list = unknown.compactMap({ listHolding($0, home) }).first
+        else {
+            showingList = true
+            return
+        }
+        // The user's own classification, which is the only one the engine will
+        // take — it is why the list can be the source of what kind of thing a
+        // line is, and why no model gets a say in it.
+        var categories: [String: String] = [:]
+        for item in list.items where !item.category.isEmpty { categories[item.name] = item.category }
+        for name in unknown { categories[name] = "groceries" }
+        _ = try? await Engine.writeList(
+            list.listID, items: list.items.map(\.name), categories: categories
+        )
+        await store.dismiss()
     }
 
     private func runDue() async {
