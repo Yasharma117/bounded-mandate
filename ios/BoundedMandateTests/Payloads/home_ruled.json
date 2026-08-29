@@ -1,0 +1,199 @@
+{
+ "rule": {
+  "per_txn_max_paise": 200000,
+  "merchants": [
+   "instamart"
+  ],
+  "categories": [
+   "groceries"
+  ],
+  "every_days": 4,
+  "orders_per_window": 1,
+  "status": "ACTIVE",
+  "delivery": {
+   "label": "Home",
+   "line": "12 Nandidurga Rd, Bengaluru"
+  }
+ },
+ "state": "ruled",
+ "chip": "Ordered",
+ "headline": "Ordered — ₹1,850, inside your rule.",
+ "detail": "Placed while you were away. Every step of it is in the ledger.",
+ "actions": [
+  {
+   "id": "view_basket",
+   "label": "View basket"
+  },
+  {
+   "id": "verify_chain",
+   "label": "Verify the chain"
+  }
+ ],
+ "decision": {
+  "cart_id": "instamart_cart_1",
+  "idempotency_key": "3e69283c3d0890deba93cd26e57cc7ed",
+  "mandate_id": "mdt_demo",
+  "reason_code": "ok.in_policy",
+  "reasons": [],
+  "total_paise": 185000,
+  "verdict": "ALLOW",
+  "ts": "2026-08-29T19:07:35.889542+00:00"
+ },
+ "grant_id": null,
+ "list_id": null,
+ "lists": [
+  {
+   "list_id": "usual",
+   "name": "My usual groceries",
+   "merchant": "instamart",
+   "items": [
+    {
+     "name": "Aashirvaad atta 5kg",
+     "price_paise": 27500,
+     "category": "groceries",
+     "url": "/m/instamart/p/Aashirvaad%20atta%205kg",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/3/9/805a02b1-e08b-4d4b-aa8f-ab05cabb1e37_1780_1.png"
+    },
+    {
+     "name": "Basmati rice 1kg",
+     "price_paise": 18500,
+     "category": "groceries",
+     "url": "/m/instamart/p/Basmati%20rice%201kg",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/7/21/ed973afb-e397-4df3-8a23-6153474d93b0_450_1.png"
+    },
+    {
+     "name": "Toned milk 1L x2",
+     "price_paise": 7000,
+     "category": "groceries",
+     "url": "/m/instamart/p/Toned%20milk%201L%20x2",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/ciw/2025/12/17/18ada512-645a-4057-a388-9749180d8ee2_31VQRTD5DH_MN_17122025.png"
+    },
+    {
+     "name": "Eggs (12)",
+     "price_paise": 9000,
+     "category": "groceries",
+     "url": "/m/instamart/p/Eggs%20%2812%29",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/2/9/1515379e-b5f2-4c3f-ab39-a9f33908dc31_853103_1.png"
+    },
+    {
+     "name": "Filter coffee 500g",
+     "price_paise": 32500,
+     "category": "groceries",
+     "url": "/m/instamart/p/Filter%20coffee%20500g",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/3/26/c9109c42-4763-4aa3-9ce5-14bc8f30649f_523244-1.png"
+    },
+    {
+     "name": "Bananas 1kg",
+     "price_paise": 6000,
+     "category": "groceries",
+     "url": "/m/instamart/p/Bananas%201kg",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/7/10/19facf52-d298-44d0-a04f-e0e28f1d88ff_AODY6XZFVF_1.png"
+    },
+    {
+     "name": "Toor dal 1kg",
+     "price_paise": 17500,
+     "category": "groceries",
+     "url": "/m/instamart/p/Toor%20dal%201kg",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/ciw/2025/12/16/eda40bda-ba3b-4fab-97ba-ccbd28c106cf_K71D7X8L8P_MN_15122025.png"
+    },
+    {
+     "name": "Sunflower oil 1L",
+     "price_paise": 15500,
+     "category": "groceries",
+     "url": "/m/instamart/p/Sunflower%20oil%201L",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/ciw/2026/2/18/d0fe0c1c-2142-43d3-bf49-3fe02eb1a7dd_PUHXM33U8E_MN_18022026.png"
+    },
+    {
+     "name": "Onions 2kg",
+     "price_paise": 8000,
+     "category": "groceries",
+     "url": "/m/instamart/p/Onions%202kg",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/8/5/aba88421-31d0-4277-9499-6343a6269a7c_2116_1.png"
+    },
+    {
+     "name": "Brown bread",
+     "price_paise": 5500,
+     "category": "groceries",
+     "url": "/m/instamart/p/Brown%20bread",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/8/18/4d86b361-52cf-4e56-bf53-612782079e15_2448_1.png"
+    },
+    {
+     "name": "Curd 400g",
+     "price_paise": 4000,
+     "category": "groceries",
+     "url": "/m/instamart/p/Curd%20400g",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/ciw/2025/12/17/323eaf43-633a-42aa-af31-90458e38e28d_ADAPHQI84A_MN_16122025.png"
+    },
+    {
+     "name": "Cow ghee 500ml",
+     "price_paise": 34000,
+     "category": "groceries",
+     "url": "/m/instamart/p/Cow%20ghee%20500ml",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/4/17/c51c7ebd-1e4d-44a2-9e7c-aa3a80eba18a_57237_1.png"
+    }
+   ],
+   "total_paise": 185000,
+   "cap_paise": 200000,
+   "unstocked": [],
+   "kind": "standing",
+   "every_days": 4,
+   "run_on": null,
+   "paused": false,
+   "spent": false,
+   "last_run_at": null,
+   "next_due_at": "2026-08-29T19:07:36.350602+00:00",
+   "due": true,
+   "schedule": "Every 4 days"
+  },
+  {
+   "list_id": "breakfast",
+   "name": "Breakfast top-up",
+   "merchant": "instamart",
+   "items": [
+    {
+     "name": "Toned milk 1L x2",
+     "price_paise": 7000,
+     "category": "groceries",
+     "url": "/m/instamart/p/Toned%20milk%201L%20x2",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/ciw/2025/12/17/18ada512-645a-4057-a388-9749180d8ee2_31VQRTD5DH_MN_17122025.png"
+    },
+    {
+     "name": "Eggs (12)",
+     "price_paise": 9000,
+     "category": "groceries",
+     "url": "/m/instamart/p/Eggs%20%2812%29",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/2/9/1515379e-b5f2-4c3f-ab39-a9f33908dc31_853103_1.png"
+    },
+    {
+     "name": "Brown bread",
+     "price_paise": 5500,
+     "category": "groceries",
+     "url": "/m/instamart/p/Brown%20bread",
+     "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/8/18/4d86b361-52cf-4e56-bf53-612782079e15_2448_1.png"
+    }
+   ],
+   "total_paise": 21500,
+   "cap_paise": 200000,
+   "unstocked": [],
+   "kind": "standing",
+   "every_days": 2,
+   "run_on": null,
+   "paused": false,
+   "spent": false,
+   "last_run_at": null,
+   "next_due_at": "2026-08-29T19:07:36.350649+00:00",
+   "due": true,
+   "schedule": "Every 2 days"
+  }
+ ],
+ "chain_intact": true,
+ "recent": [
+  {
+   "ts": "2026-08-29T19:07:35.889542+00:00",
+   "verdict": "ALLOW",
+   "summary": "Within your rule",
+   "total_paise": 185000,
+   "event": null
+  }
+ ]
+}

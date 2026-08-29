@@ -425,6 +425,82 @@ struct CardCopyTests {
         #expect(!decision.grantable)
     }
 
+    // MARK: - the home screen's states
+    //
+    // Eight captures from a running engine, one per state. What is worth
+    // pinning is not that they decode but *which single fact* each one leads
+    // with, because the whole surface exists to say one thing to somebody who
+    // was not there when it happened.
+
+    private func home(_ state: String) throws -> Home {
+        try decode(Home.self, "home_\(state)")
+    }
+
+    @Test func theRuleFinallyHasAScreen() throws {
+        let rule = try home("at_rest").rule
+        #expect(rule.perTxnMaxPaise == 200_000)
+        // One line, not four labelled rows.
+        #expect(rule.summary == "instamart · groceries · every 4 days · to Home")
+    }
+
+    @Test func aListAboutToRunSaysThereIsNothingToDo() throws {
+        let out = try home("preflight")
+        #expect(out.state == "preflight")
+        #expect(out.detail.lowercased().contains("nothing for you to do"))
+        #expect(out.actions.map(\.id) == ["pause", "view_basket"])
+    }
+
+    @Test func anOrderYouMissedSaysSo() throws {
+        let out = try home("ruled")
+        #expect(out.state == "ruled")
+        #expect(out.detail.contains("while you were away"))
+    }
+
+    @Test func anEscalationOffersRoutesAndTakesNone() throws {
+        let out = try home("escalated")
+        #expect(out.actions.map(\.id) == ["approve_once", "drop_flagged", "not_now"])
+        #expect(out.decision?.verdict == .escalate)
+        // Which two items, not just how many.
+        #expect(out.detail.contains("Bluetooth earbuds"))
+    }
+
+    @Test func aRefusalOffersNoWayToApproveIt() throws {
+        let out = try home("refused")
+        #expect(out.decision?.verdict == .deny)
+        #expect(out.actions.map(\.id) == ["see_attempt"])
+        #expect(!out.actions.contains { $0.id == "approve_once" })
+    }
+
+    @Test func theHaltNamesTheAddressAndNotSomethingElse() throws {
+        let out = try home("halted")
+        #expect(out.headline.contains("authorised"))
+        #expect(out.actions.map(\.id) == ["reauthorise", "cancel_basket"])
+    }
+
+    @Test func aLiveGrantSaysItIsSpendableOnce() throws {
+        let out = try home("grant_live")
+        #expect(out.state == "grant_live")
+        #expect(out.grantID?.hasPrefix("grant_") == true)
+        #expect(out.detail.contains("once"))
+    }
+
+    @Test func onlyTheStatesYouCanPutDownAreDismissable() throws {
+        // A refusal wants a decision; a live grant is spending a clock.
+        #expect(try home("escalated").dismissable)
+        #expect(try !home("preflight").dismissable)
+        #expect(try !home("grant_live").dismissable)
+    }
+
+    @Test func nothingOnTheHomeScreenReadsLikeAnIdentifier() throws {
+        for state in ["at_rest", "preflight", "ruled", "escalated", "refused",
+                      "clarify", "halted", "grant_live"] {
+            let out = try home(state)
+            for line in [out.headline, out.detail, out.chip] + out.actions.map(\.label) {
+                #expect(!line.contains("_"), "\(state): \(line) reads like a symbol")
+            }
+        }
+    }
+
     // MARK: - product photographs
     //
     // `decision_live.json` was captured from a real Instamart cart on

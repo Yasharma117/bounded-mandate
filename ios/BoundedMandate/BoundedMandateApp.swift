@@ -15,7 +15,7 @@ private struct Root: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        ThreadView()
+        HomeView()
             .environment(\.theme, Token.palette(scheme))
             .tint(Token.palette(scheme).primary)
     }

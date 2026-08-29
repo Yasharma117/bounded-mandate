@@ -118,6 +118,10 @@ final class Thread {
 struct ThreadView: View {
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dismiss) private var dismiss
+    /// Opened from the waveform rather than the field. Voice is still a state
+    /// of the composer, not a screen — this only decides which state it opens in.
+    var startInVoice = false
     @State private var thread = Thread()
     @State private var draft = ""
     @FocusState private var writing: Bool
@@ -174,13 +178,14 @@ struct ThreadView: View {
             }
             .background(backdrop)
             .navigationTitle("Bounded Mandate")
+            .navigationBarTitleDisplayMode(.inline)
 
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showingAddress = true } label: {
-                        Image(systemName: "mappin.and.ellipse")
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
                     }
-                    .accessibilityLabel("Delivery address")
+                    .accessibilityLabel("Back")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingList = true } label: {
@@ -194,6 +199,7 @@ struct ThreadView: View {
             // One ring per hand-over: you stopped, it is thinking, it is
             // speaking. Voice has no cursor, so the screen has to say so.
             .onChange(of: voice?.phase) { pulse += 1 }
+            .task { if startInVoice, voice == nil { startTalking() } }
             // `safeAreaBar` paints its own glass, which sat as a translucent
             // slab behind the orb. The composer already carries its own glass,
             // so it takes the plain inset and measures itself instead.

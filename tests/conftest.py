@@ -98,6 +98,7 @@ class FakeGateway:
 #: dict. A grant is an ordinary Policy in `web.POLICIES`, so without this the
 #: mandates one test mints are still standing in the next.
 SEED_POLICIES = dict(web.POLICIES)
+SEED_DELIVERY = web.DELIVERY_ID
 
 
 @pytest.fixture
@@ -109,6 +110,10 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(web, "LISTS", seed_lists())
     monkeypatch.setattr(web, "POLICIES", dict(SEED_POLICIES))
     monkeypatch.setattr(web, "GRANTS", {})
+    # Where things get delivered is module state too, and choosing an address
+    # rewrites the policy — so a test that moves it would otherwise move it for
+    # every test after.
+    monkeypatch.setattr(web, "DELIVERY_ID", SEED_DELIVERY)
     c = TestClient(web.app)
     c.gateway = gw
     return c

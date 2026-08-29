@@ -21,7 +21,7 @@ import contextlib
 import os
 import secrets
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from html import escape
 from pathlib import Path
 from urllib.parse import quote
@@ -42,7 +42,7 @@ from .merchant import MERCHANT_NAME, UnknownItem, UnknownMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
 from .swiggy import ADDRESS_ID as SWIGGY_ADDRESS_ID
 from .voice import SPEAKERS, TTS_PROVIDER, VoiceUnavailable, speak, transcribe
-from .wording import summary, title
+from .wording import action, chip, summary, title
 
 
 @contextlib.asynccontextmanager
@@ -396,6 +396,19 @@ def grant_once(body: GrantRequest) -> dict:
     try:
         policy = grant_for_cart(cart, grant_id=grant_id, authorised_addresses=_standing_addresses())
     except GrantRefused as exc:
+        # Recorded rather than only returned. An attempt to approve a basket
+        # bound for an address the rule does not cover is exactly the event the
+        # delivery bound exists to catch, and a 403 the app swallows would
+        # leave the user with nothing to look at afterwards.
+        LEDGER.append(
+            {
+                "event": "HALTED",
+                "reason_code": "delivery.unknown_address",
+                "cart_id": cart.cart_id,
+                "total_paise": cart.total_paise,
+                "detail": str(exc),
+            }
+        )
         raise HTTPException(403, str(exc)) from exc
     POLICIES[grant_id] = policy
 
@@ -1045,6 +1058,265 @@ def _product(merchant: str, name: str):
         return MARKETPLACE[merchant].catalog[name]
     except (UnknownMerchant, UnknownItem, KeyError):
         return None
+
+
+# --- the home screen ---------------------------------------------------------
+#
+# The one surface this product could not do without, and the last one built.
+#
+# Everything else here assumes somebody is present: a thread you type into, a
+# card that answers a question you asked. But the whole claim is that **nobody
+# is present** — the scheduler proposes at 9am, the engine rules, the ledger
+# records, and if you were not in the thread at that moment nothing ever told
+# you. An unattended decision had nowhere to land.
+#
+# So home answers one question before it is asked: *where do I stand?* And the
+# server decides what that answer is, for the same reason it decides `off_scope`
+# and `merchant_allowed` — whether a thing needs the user is the policy's
+# judgement, and a client should not be reimplementing it.
+
+#: A list falling due inside this window is worth saying out loud before it
+#: runs. Wider than a day, so an overnight order is announced the evening
+#: before rather than at three in the morning.
+PREFLIGHT_WINDOW = timedelta(hours=36)
+
+#: How long an order stays *news*. After this the receipt stops being the thing
+#: the screen leads with, and the rule goes back to quietly running.
+NEWS_WINDOW = timedelta(hours=12)
+
+
+@dataclass(frozen=True)
+class HomeState:
+    """What the home card says, and what it offers.
+
+    `actions` are **proposed and never taken** — the same contract the engine
+    keeps with the agent, rendered as UI. A refusal offers none, and that
+    absence is deliberate: an agent caught misreporting its own basket is not a
+    thing to wave through with one tap.
+    """
+
+    state: str
+    headline: str
+    detail: str
+    actions: tuple[str, ...] = ()
+    decision: dict | None = None
+    grant_id: str | None = None
+    list_id: str | None = None
+
+
+def _ledger_view() -> tuple[set[str], list[dict]]:
+    """One pass over the ledger for everything home needs from it.
+
+    Returns dismissed idempotency keys, and every decision oldest-first.
+    """
+    dismissed: set[str] = set()
+    decisions: list[dict] = []
+    for entry in LEDGER.entries():
+        payload = entry.payload
+        if payload.get("event") == "SEEN":
+            dismissed.add(payload.get("idempotency_key"))
+        elif payload.get("event") == "HALTED":
+            decisions.append(
+                {
+                    **payload,
+                    "ts": entry.ts,
+                    "verdict": Verdict.ESCALATE.value,
+                    "idempotency_key": f"halt_{payload.get('cart_id')}",
+                    "reasons": [{"code": "delivery.unknown_address", "detail": payload["detail"]}],
+                }
+            )
+        elif payload.get("verdict"):
+            decisions.append({**payload, "ts": entry.ts})
+    return dismissed, decisions
+
+
+def _needs_you(decision: dict) -> HomeState:
+    """A decision the user has to answer, in the words for *why*.
+
+    Four different shapes, because they want four different answers. Naming the
+    wrong one is worse than naming none — the same reason the offers card
+    answers merchant and category separately.
+    """
+    codes = decision.get("reason_code", "")
+    reasons = [r.get("detail", "") for r in decision.get("reasons") or []]
+    detail = " ".join(reasons) or summary(codes)
+    rupees = f"₹{decision.get('total_paise', 0) / 100:,.0f}"
+
+    if "delivery.unknown_address" in codes:
+        return HomeState(
+            "needs_you",
+            "Halted — that is not an address you authorised.",
+            f"A {rupees} basket is staged for somewhere your rule does not cover. "
+            "Nothing ships until you say so.",
+            ("reauthorise", "cancel_basket"),
+            decision=decision,
+        )
+    if decision["verdict"] == Verdict.DENY.value:
+        return HomeState(
+            "needs_you",
+            "Refused, and nothing was charged.",
+            detail,
+            # No approval path, on purpose.
+            ("see_attempt",),
+            decision=decision,
+        )
+    if decision["verdict"] == Verdict.CLARIFY.value:
+        return HomeState(
+            "needs_you",
+            "One line needs an answer.",
+            detail,
+            ("classify", "approve_once", "leave_out"),
+            decision=decision,
+        )
+    return HomeState(
+        "needs_you",
+        f"Your call on {rupees}.",
+        detail,
+        ("approve_once", "drop_flagged", "not_now"),
+        decision=decision,
+    )
+
+
+def _home_state(now: datetime | None = None) -> HomeState:
+    """Which of the five states the engine is in. A pure read.
+
+    Precedence: something waiting on you, then money already committed, then the
+    newest thing that happened, then the next thing due. "Needs you" outranks
+    everything because it is the only state where the product is stuck.
+    """
+    now = now or datetime.now(UTC)
+    dismissed, decisions = _ledger_view()
+    latest = next(
+        (d for d in reversed(decisions) if d.get("idempotency_key") not in dismissed), None
+    )
+
+    if latest and latest["verdict"] != Verdict.ALLOW.value:
+        return _needs_you(latest)
+
+    live = next((g for g in GRANTS.values() if g.state(now) == "ready"), None)
+    if live is not None:
+        return HomeState(
+            "grant_live",
+            f"Approved — ₹{live.amount_paise / 100:,.0f}, this basket only.",
+            "It lapses in fifteen minutes and can be spent once.",
+            ("pay", "let_lapse"),
+            grant_id=live.grant_id,
+        )
+
+    # An order that just happened outranks one that has not. It is the newer
+    # fact, and the reader was not there to see it — which is the whole reason
+    # this screen exists.
+    if latest and datetime.fromisoformat(latest["ts"]) >= now - NEWS_WINDOW:
+        return HomeState(
+            "ruled",
+            f"Ordered — ₹{latest.get('total_paise', 0) / 100:,.0f}, inside your rule.",
+            "Placed while you were away. Every step of it is in the ledger.",
+            ("view_basket", "verify_chain"),
+            decision=latest,
+        )
+
+    due = sorted(
+        (s for s in LISTS.values() if s.next_due(now) is not None),
+        key=lambda s: s.next_due(now),  # type: ignore[return-value]
+    )
+    soon = next((s for s in due if s.next_due(now) - now <= PREFLIGHT_WINDOW), None)
+    if soon is not None:
+        rows = _list_rows(soon)
+        when = soon.next_due(now)
+        moment = "shortly" if when <= now else when.strftime("%-d %b at %H:%M")
+        return HomeState(
+            "preflight",
+            f"{soon.name} goes out {moment}.",
+            f"₹{rows['total_paise'] / 100:,.0f} of your ₹{rows['cap_paise'] / 100:,.0f} cap. "
+            "Nothing for you to do.",
+            ("pause", "view_basket"),
+            list_id=soon.list_id,
+        )
+
+    nxt = due[0].next_due(now) if due else None
+    return HomeState(
+        "at_rest",
+        "Your rule is running.",
+        (
+            f"Next order {nxt.strftime('%-d %b at %H:%M')}."
+            if nxt
+            else "Nothing scheduled — your lists run only when you ask."
+        )
+        + " You will hear from it when something crosses a line.",
+        ("view_rule", "pause"),
+    )
+
+
+def _rule_block() -> dict:
+    """The standing mandate, as bounds rather than prose.
+
+    It had no screen and no route until now, which is a strange gap in a product
+    whose whole subject it is.
+    """
+    policy = POLICIES["mdt_demo"]
+    here = next((a for a in _address_rows() if a["selected"]), None)
+    return {
+        "per_txn_max_paise": policy.per_txn_max_paise,
+        "merchants": sorted(policy.merchants),
+        # `fees` is allowed by construction and is not a thing anybody chose to
+        # buy, so it does not belong in a sentence describing what you allowed.
+        "categories": sorted(policy.categories - {FEES}),
+        "every_days": policy.window_days,
+        "orders_per_window": policy.max_charges_per_window,
+        "status": policy.status.value,
+        "delivery": {"label": here["label"], "line": here["line"]} if here else None,
+    }
+
+
+@app.get("/api/home")
+def home() -> dict:
+    """Where do I stand — answered before anybody asks."""
+    current = _home_state()
+    entries = list(LEDGER.entries())
+    try:
+        LEDGER.verify()
+        intact = True
+    except Exception:
+        intact = False
+    return {
+        "rule": _rule_block(),
+        "state": current.state,
+        "chip": chip(current.state),
+        "headline": current.headline,
+        "detail": current.detail,
+        "actions": [action(a) for a in current.actions],
+        "decision": current.decision,
+        "grant_id": current.grant_id,
+        "list_id": current.list_id,
+        "lists": [_list_rows(s) for s in LISTS.values()],
+        "chain_intact": intact,
+        "recent": [
+            {
+                "ts": e.ts,
+                "verdict": e.payload.get("verdict"),
+                "summary": summary(e.payload.get("reason_code", "")),
+                "total_paise": e.payload.get("total_paise"),
+                "event": e.payload.get("event"),
+            }
+            for e in entries[-6:][::-1]
+        ],
+    }
+
+
+class Seen(BaseModel):
+    idempotency_key: str = Field(min_length=1)
+
+
+@app.post("/api/home/seen")
+def mark_seen(body: Seen) -> dict:
+    """Dismiss what the home card is showing.
+
+    Written to the ledger rather than mutating anything, because this ledger is
+    append-only and "the user looked at it" is an event — the same class of
+    thing as the decision it dismisses.
+    """
+    LEDGER.append({"event": "SEEN", "idempotency_key": body.idempotency_key})
+    return {"seen": body.idempotency_key, "state": _home_state().state}
 
 
 # --- the scheduler ----------------------------------------------------------

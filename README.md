@@ -727,6 +727,66 @@ uv run uvicorn bounded_mandate.web:app --reload
 Then open `http://127.0.0.1:8000`, edit the rule, press **Read it back** to see
 it compiled, and **Confirm and register** to open Razorpay's modal in test mode.
 
+## The home screen, and its states
+
+The app's home was a chat thread that opened with two seeded messages. It told
+you nothing until you spoke to it — which is the wrong metaphor for a product
+whose whole claim is that **nobody is present**. A chat-first home says "drive
+me by talking"; the thesis says "I ran while you were asleep."
+
+Worse, an unattended decision had nowhere to land. The scheduler proposes at
+nine, the engine rules, the ledger records — and if you were not in the thread
+at that moment, nothing ever told you. Home now answers one question before it
+is asked: *where do I stand?*
+
+**The server decides which state that is.** `GET /api/home` returns the state,
+the words for it, and the routes it offers — the same rule that already puts
+`off_scope`, `merchant_allowed` and `authorised` server-side, because whether
+something needs the user is the policy's judgement and a client should not be
+reimplementing it. The prose lives in
+[wording.py](bounded_mandate/wording.py) beside the reason titles, for the
+reason that module already existed.
+
+Precedence: something waiting on you, then money already committed, then the
+newest thing that happened, then the next thing due.
+
+| State | What it leads with | Offers |
+|---|---|---|
+| `at_rest` | "Your rule is running." | view rule · pause |
+| `preflight` | "My usual groceries goes out shortly. ₹1,850 of your ₹2,000 cap. **Nothing for you to do.**" | pause · view basket |
+| `ruled` | "Ordered — ₹1,850, inside your rule. Placed **while you were away**." | view basket · verify the chain |
+| `needs_you` — escalation | "Your call on ₹2,400." Names *which* two items. | approve just this basket · remove the flagged items · not now |
+| `needs_you` — refusal | "Refused, and nothing was charged." | see what it tried. **Nothing else.** |
+| `needs_you` — clarify | "One line needs an answer." | add to my list · approve once · leave it out |
+| `needs_you` — halt | "Halted — that is not an address you authorised." | re-authorise · cancel the basket |
+| `grant_live` | "Approved — ₹15,000, this basket only." | pay · let it lapse |
+
+Two properties the set is careful about.
+
+**Options are proposed and never taken.** That is not a UI convention here, it
+is the engine's contract with the agent rendered as buttons — and it is why the
+refusal arrives with no approval among them. An agent caught misreporting its
+own basket is not a thing to wave through with one tap, and the absence is
+visible in the same table as everything else.
+
+**The halt is recorded, not only returned.** Trying to approve a basket bound
+for an address the rule no longer covers is refused with a `403` — and written
+to the ledger as a `HALTED` event, so it becomes a state the reader can look at
+afterwards rather than an error the app swallowed. Dismissing any of these
+appends a `SEEN` entry rather than mutating anything: this ledger is
+append-only, and "the user looked at it" is the same class of thing as the
+decision it dismisses.
+
+Layout, hierarchy and the timing of what surfaces when are taken from the Nola
+reference; **no colour is** — the palette is unchanged. What that reference is
+really good at is one hero figure carrying the hierarchy, prose before
+structure, options stacked rather than rowed, and the least urgent thing
+deliberately passing under the command bar.
+
+Also closed on the way: `MandateCard` was only ever reachable from a one-time
+grant, so **the standing rule — the central object of the product — had no
+screen and no route.** It is the page header now.
+
 ## Where things get delivered
 
 The third thing the user owns, and the one with the sharpest edge on it. A
@@ -953,7 +1013,10 @@ a second mandate from the basket the engine fetched, `GET /pay` is a real
 Standard Checkout, and paying revokes the grant. Delivery is a user-owned
 choice over the account's own address book, matched by id rather than prose,
 and every line the user reads carries the merchant's own product photography.
-308 Python tests and 37 Swift tests, no network.
+321 Python tests and 46 Swift tests, no network.
+
+**Phase 4 (the home screen) — built.** Eight states, each a real engine outcome
+reachable through ordinary actions rather than a demo switch.
 
 Next: an app icon and the recorded walkthrough.
 

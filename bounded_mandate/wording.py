@@ -37,6 +37,64 @@ TITLES: dict[str, str] = {
 }
 
 
+# --- what the home screen says ------------------------------------------------
+#
+# The home screen has one card whose contents are the engine's current state.
+# The words for each state live here for the same reason the reason titles do:
+# the code is what the ledger stores, and a person should never have to read it.
+#
+# Each state also carries the *actions it offers*. They are listed here, beside
+# the sentence that raises them, because an option the user is offered is part
+# of what the product just said to them — and because a refusal offers none, and
+# that absence should be visible in the same table as the rest.
+
+#: The card's one-word status. Kept short on purpose: it is read at a glance,
+#: usually while the reader is deciding whether they need to do anything at all.
+CHIPS: dict[str, str] = {
+    "at_rest": "Running",
+    "preflight": "On track",
+    "ruled": "Ordered",
+    "needs_you": "Needs you",
+    "grant_live": "Approved",
+}
+
+#: `id -> label`. The app renders these; it never invents one.
+ACTIONS: dict[str, str] = {
+    "view_rule": "View rule",
+    "pause": "Pause",
+    "resume": "Resume",
+    "view_basket": "View basket",
+    "verify_chain": "Verify the chain",
+    "approve_once": "Approve just this basket",
+    "drop_flagged": "Remove the flagged items",
+    "not_now": "Not now",
+    "classify": "Add to my list as groceries",
+    "leave_out": "Leave it out",
+    "reauthorise": "Re-authorise this address",
+    "cancel_basket": "Cancel the basket",
+    "see_attempt": "See what it tried",
+    "pay": "Pay now",
+    "let_lapse": "Let it lapse",
+}
+
+
+def action(identifier: str) -> dict[str, str]:
+    """One offered action, as the app receives it.
+
+    An unknown id falls back to something readable rather than the identifier,
+    on the same principle as `title` — a symbol reaching the screen is a bug in
+    this table and the user should not be the one who pays for it.
+    """
+    return {
+        "id": identifier,
+        "label": ACTIONS.get(identifier, identifier.replace("_", " ").capitalize()),
+    }
+
+
+def chip(state: str) -> str:
+    return CHIPS.get(state, state.replace("_", " ").capitalize())
+
+
 def title(code: str) -> str:
     """A human name for one reason code.
 

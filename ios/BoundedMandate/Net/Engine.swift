@@ -45,6 +45,28 @@ enum Engine {
         URL(string: baseURL.absoluteString + path)
     }
 
+    /// Fire the scheduler once, by hand — what the timer does, on demand.
+    static func runDue() async throws {
+        struct Ran: Decodable { let ran: [JSONNull] }
+        struct JSONNull: Decodable { init(from decoder: any Decoder) throws {} }
+        let _: Ran = try await send("/api/lists/run-due", method: "POST")
+    }
+
+    /// Where do I stand. One call, because *which* state the engine is in is
+    /// the engine's judgement — the app renders it and does not decide it.
+    static func readHome() async throws -> Home {
+        try await send("/api/home", method: "GET")
+    }
+
+    /// Put down what the home card is showing. Appended to the ledger rather
+    /// than mutating anything: "the user looked at it" is an event.
+    static func markSeen(_ idempotencyKey: String) async throws {
+        struct Ack: Decodable { let state: String }
+        let _: Ack = try await send(
+            "/api/home/seen", method: "POST", body: ["idempotency_key": idempotencyKey]
+        )
+    }
+
     /// Every address on the user's account, and which one orders go to.
     static func readAddresses() async throws -> [DeliveryAddress] {
         struct Wrapper: Decodable { let addresses: [DeliveryAddress] }
