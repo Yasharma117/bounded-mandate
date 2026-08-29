@@ -56,8 +56,14 @@ sentence, then stop. Do not mention the others.
 You do not know which shops the account holder allows, so never say whether one
 is permitted — the screen tells them that, and guessing would mislead.
 
-Call each of those three once. If a cart already exists, use its id rather than
-building a second one.
+Call each of those three once. If a cart already exists, charge *that* cart —
+never abandon one to build another.
+
+If the person did not name a shop, omit `merchant` entirely and the account's
+usual one is used. Do not go looking for a cheaper shop on your own: you cannot
+see which ones the account holder allows, so switching is a guess, and a guess
+made with somebody else's money is not yours to make. Compare shops only when
+you are asked to.
 
 You do not decide whether a purchase is permitted — an authorisation engine does,
 and it checks your cart independently. If it declines, say so plainly and stop.
@@ -120,14 +126,27 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "create_cart",
-            "description": "Put items in a cart at one shop. Returns a cart id and its total.",
+            "description": ("Put items in a cart at one shop. Returns a cart id and its total."),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "item_names": {"type": "array", "items": {"type": "string"}},
-                    "merchant": {"type": "string"},
+                    # Optional, and that is the fix for a real misbehaviour.
+                    # Required, the model had to name a shop on every call while
+                    # knowing nothing about which ones are allowed — so it
+                    # guessed, often at whichever looked cheapest, and the
+                    # engine refused a basket the user never asked to move.
+                    # The prompt asking it not to guess was obeyed about half
+                    # the time, because the schema was still demanding an answer.
+                    "merchant": {
+                        "type": "string",
+                        "description": (
+                            "Only when the person named a shop. Omit it otherwise "
+                            "and the account's usual shop is used."
+                        ),
+                    },
                 },
-                "required": ["item_names", "merchant"],
+                "required": ["item_names"],
             },
         },
     },
@@ -192,6 +211,8 @@ class BuyerAgent:
         self.client = client or default_client()
         self.model = model or MODEL
         self.system = system or SYSTEM
+        #: The shop the first cart of a run was built at. See `_create_cart`.
+        self._shop: str | None = None
 
     # --- the tools the agent actually holds ----------------------------------
 
@@ -217,6 +238,25 @@ class BuyerAgent:
         }
 
     def _create_cart(self, item_names: list[str], merchant: str) -> dict[str, Any]:
+        # One shop per run, enforced here rather than asked for in the prompt.
+        #
+        # Left to itself the agent would build the right cart, abandon it, and
+        # rebuild at whichever shop looked cheaper — then charge that one. The
+        # engine refuses it, so no money is at risk; what is at risk is the
+        # user's understanding, because the refusal names a shop they never
+        # asked for. Rebuilding a basket is legitimate (an item may not be
+        # stocked); moving shops halfway through is not, and a prompt asking
+        # nicely was obeyed about half the time.
+        #
+        # The first cart of a run fixes the shop. Comparing shops is still
+        # possible — `search_catalog` is untouched, and an agent asked to
+        # compare may build at whichever shop it likes *first*.
+        if self._shop is not None and merchant != self._shop:
+            return {
+                "error": f"this order is being built at {self._shop}; "
+                f"finish it there rather than starting again at {merchant}"
+            }
+
         # The user's own classification travels with the cart. Read from the
         # list, never from the model: the agent names *what* to buy and has no
         # say in *what kind of thing* it is, which is what keeps a category from
@@ -239,6 +279,7 @@ class BuyerAgent:
             return {"error": str(exc.args[0])}
         except KeyError as exc:
             return {"error": f"not stocked: {exc.args[0]}"}
+        self._shop = cart.merchant
         return {
             "cart_id": cart.cart_id,
             "merchant": cart.merchant,
@@ -288,6 +329,7 @@ class BuyerAgent:
 
     def run(self, instruction: str, *, max_turns: int = MAX_TURNS) -> AgentRun:
         out = AgentRun(instruction)
+        self._shop = None
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.system},
             {"role": "user", "content": instruction},

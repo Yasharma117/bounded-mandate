@@ -1314,7 +1314,30 @@ def mark_seen(body: Seen) -> dict:
     Written to the ledger rather than mutating anything, because this ledger is
     append-only and "the user looked at it" is an event — the same class of
     thing as the decision it dismisses.
+
+    **You cannot dismiss what has not happened.** Idempotency keys are
+    `sha256(mandate | window | cart)[:32]` — deterministic, and cart ids are
+    predictable on both backends (sequential on the mock, a content hash on
+    Swiggy). So the key of a decision that has not been made yet is computable,
+    and without this check it could be dismissed *in advance*: the engine would
+    still refuse the basket, and the user would never be told it had. Silencing
+    the interrupt defeats the escalation as thoroughly as widening the cap
+    would, and it is the quieter of the two failures.
     """
+    known = {
+        entry.payload.get("idempotency_key")
+        for entry in LEDGER.entries()
+        if entry.payload.get("verdict") or entry.payload.get("event") == "HALTED"
+    }
+    # A HALTED event carries no key of its own; `_ledger_view` derives one.
+    known |= {
+        f"halt_{entry.payload.get('cart_id')}"
+        for entry in LEDGER.entries()
+        if entry.payload.get("event") == "HALTED"
+    }
+    if body.idempotency_key not in known:
+        raise HTTPException(404, "there is no such decision to dismiss")
+
     LEDGER.append({"event": "SEEN", "idempotency_key": body.idempotency_key})
     return {"seen": body.idempotency_key, "state": _home_state().state}
 

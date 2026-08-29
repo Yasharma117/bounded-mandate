@@ -15,8 +15,10 @@ import json
 
 import pytest
 
-from bounded_mandate import Cart, CartItem, Proposal, Verdict, decide
+from bounded_mandate import Cart, CartItem, Proposal, Verdict, decide, web
+from bounded_mandate.basket import USUAL_GROCERIES
 from bounded_mandate.categories import FEES, categorise, with_fees
+from bounded_mandate.merchant import Marketplace
 from bounded_mandate.swiggy import SwiggyAdapter, SwiggyUnavailable, cart_id_for
 from tests.conftest import HOME, NOW, merchant_holding
 
@@ -404,3 +406,117 @@ class TestHistoryCannotBeOutrun:
         assert first.verdict is Verdict.ALLOW
         assert second.verdict is Verdict.DENY
         assert "duplicate.suppressed" in second.reason_code
+
+
+class TestAnInterruptCannotBeSilenced:
+    """Found by probing the home screen, and introduced by it.
+
+    Idempotency keys are `sha256(mandate | window | cart)[:32]` — deterministic,
+    and cart ids are predictable on both backends (sequential on the mock, a
+    content hash on Swiggy). So the key of a decision that has not been made yet
+    is computable by anyone who can see one.
+
+    The engine still refused the basket, so no money was ever at risk. What was
+    at risk is the only channel by which the user finds out — and silencing the
+    interrupt defeats an escalation as thoroughly as widening the cap would,
+    while looking like nothing happened.
+    """
+
+    def test_a_decision_cannot_be_dismissed_before_it_is_made(self, client):
+        from datetime import UTC, datetime
+
+        from bounded_mandate.engine import idempotency_key
+
+        # Observe one cart id, predict the next.
+        seen = web.MARKETPLACE.create_cart(["Brown bread"], merchant="instamart")
+        number = int(seen.cart_id.rsplit("_", 1)[1])
+        ahead = idempotency_key(
+            web.POLICIES["mdt_demo"], f"instamart_cart_{number + 1}", datetime.now(UTC)
+        )
+
+        refused = client.post("/api/home/seen", json={"idempotency_key": ahead})
+        assert refused.status_code == 404
+
+        client.post(
+            "/api/proposal",
+            json={
+                "items": [*USUAL_GROCERIES, "Bluetooth earbuds", "Phone case"],
+                "claimed_total_paise": 240_000,
+            },
+        )
+        assert client.get("/api/home").json()["state"] == "needs_you"
+
+    def test_a_decision_that_happened_can_still_be_dismissed(self, client):
+        """The guard must not have closed on the thing the button is for."""
+        client.post(
+            "/api/proposal",
+            json={
+                "items": [*USUAL_GROCERIES, "Bluetooth earbuds", "Phone case"],
+                "claimed_total_paise": 240_000,
+            },
+        )
+        key = client.get("/api/home").json()["decision"]["idempotency_key"]
+
+        assert client.post("/api/home/seen", json={"idempotency_key": key}).status_code == 200
+        assert client.get("/api/home").json()["state"] != "needs_you"
+
+
+class TestTheAgentCannotGoShopping:
+    """Left to itself the agent built the right cart, abandoned it, and rebuilt
+    at whichever shop looked cheaper — then charged that one.
+
+    The engine refused it, so the money was never at risk; the user's
+    understanding was, because the refusal named a shop they never asked for.
+    Both causes were ours rather than the model's: `merchant` was a **required**
+    tool parameter, so the model had to name a shop while knowing nothing about
+    which ones are allowed, and nothing stopped it changing its mind afterwards.
+    """
+
+    def test_naming_a_shop_is_optional_so_it_is_never_forced_to_guess(self):
+        from bounded_mandate.agent import TOOLS
+
+        schema = next(t for t in TOOLS if t["function"]["name"] == "create_cart")
+        assert schema["function"]["parameters"]["required"] == ["item_names"]
+
+    def test_omitting_the_shop_uses_the_account_s_usual_one(self, ledger):
+        from bounded_mandate.agent import BuyerAgent
+
+        agent = BuyerAgent(
+            marketplace=Marketplace(),
+            policies={},
+            ledger=ledger,
+            mandate_id="mdt_1",
+            delivery_address=HOME,
+            client=object(),
+        )
+        assert (
+            agent._dispatch(None, "create_cart", {"item_names": ["Brown bread"]})["merchant"]
+            == "instamart"
+        )
+
+    def test_the_first_cart_fixes_the_shop_for_the_rest_of_the_run(self, ledger):
+        """Rebuilding a basket is legitimate — an item may not be stocked.
+        Moving shops halfway through is not."""
+        from bounded_mandate.agent import BuyerAgent
+
+        agent = BuyerAgent(
+            marketplace=Marketplace(),
+            policies={},
+            ledger=ledger,
+            mandate_id="mdt_1",
+            delivery_address=HOME,
+            client=object(),
+        )
+        first = agent._dispatch(None, "create_cart", {"item_names": ["Brown bread"]})
+        assert first["merchant"] == "instamart"
+
+        moved = agent._dispatch(
+            None, "create_cart", {"item_names": ["Brown bread"], "merchant": "blinkit"}
+        )
+        assert "error" in moved
+        assert "instamart" in moved["error"]
+
+        # Same shop again is fine: that is a corrected basket, not a new shop.
+        assert "cart_id" in agent._dispatch(
+            None, "create_cart", {"item_names": ["Curd 400g"], "merchant": "instamart"}
+        )

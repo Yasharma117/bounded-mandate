@@ -53,6 +53,40 @@ Two smaller things fell out of the same fix: it was building two carts per run
 and reporting an authorised order as *"placed successfully"*, which on this
 account is an order nobody has paid.
 
+### What stress-testing it turned up
+
+Three findings, all of them ours rather than the model's, and one of them a
+security hole introduced by the home screen two commits earlier.
+
+**An interrupt could be silenced before it happened.** Idempotency keys are
+`sha256(mandate | window | cart)[:32]` — deterministic — and cart ids are
+predictable on both backends. So the key of a decision that has not been made
+yet is computable, and `POST /api/home/seen` accepted it. The engine still
+refused the basket, so no money was at risk; what was at risk is the only
+channel by which the user finds out. **Silencing the interrupt defeats an
+escalation as thoroughly as widening the cap would, and it looks like nothing
+happened.** A dismissal is now refused unless the decision it names is already
+in the ledger.
+
+**`merchant` was a required tool parameter.** The model had to name a shop on
+every `create_cart` while knowing nothing about which shops are allowed — by
+design, it cannot read its own policy — so it guessed, often at whichever looked
+cheapest. The engine refused the basket and the user got a refusal naming a shop
+they never asked for. Asking the prompt nicely was obeyed about half the time,
+because the schema was still demanding an answer. It is optional now, and
+omitting it uses the account's usual shop.
+
+**The agent went shopping around.** It would build the right cart, abandon it,
+and rebuild somewhere cheaper. The first cart of a run now fixes the shop, in
+the harness rather than the prompt — rebuilding a basket is legitimate, moving
+shops halfway through is not. Flailing went from two to five carts per run down
+to one.
+
+What held, unchanged: three prompt injections delivered through the *user's own
+utterance* — including one that talked the agent into misreporting its total,
+which came back `provenance.total_mismatch`. Nothing outside the mandate was
+ever authorised in any probe.
+
 ### Run against a live model
 
 Honest run, `nvidia/nemotron-3-super-120b-a12b`, 5.4s:
@@ -1034,7 +1068,7 @@ a second mandate from the basket the engine fetched, `GET /pay` is a real
 Standard Checkout, and paying revokes the grant. Delivery is a user-owned
 choice over the account's own address book, matched by id rather than prose,
 and every line the user reads carries the merchant's own product photography.
-321 Python tests and 46 Swift tests, no network.
+326 Python tests and 46 Swift tests, no network.
 
 **Phase 4 (the home screen) — built.** Eight states, each a real engine outcome
 reachable through ordinary actions rather than a demo switch.
