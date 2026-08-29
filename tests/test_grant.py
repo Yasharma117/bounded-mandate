@@ -338,3 +338,25 @@ def test_the_checkout_payload_carries_contact_details_and_nothing_more(client):
     body = json.dumps(payload).lower()
     for forbidden in ("card", "cvv", "pan", "expiry", "number"):
         assert forbidden not in body, f"the checkout payload mentions {forbidden}"
+
+
+def test_the_grant_remembers_which_customer_the_card_is_saved_against(client):
+    """It lived in a module global, so after a restart the checkout arrived with
+    no customer — which Razorpay reads as a new one, and a card saved five
+    minutes earlier came back as a blank Card Number field."""
+    grant_id = grant(client, refused(client)["cart_id"]).json()["grant"]["grant_id"]
+    assert web.GRANTS[grant_id].customer_id == "cust_1"
+
+    web._CUSTOMER = None  # what a restart looks like
+    assert client.get(f"/api/grant/{grant_id}").json()["customer_id"] == "cust_1"
+
+
+def test_the_customer_survives_the_process(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(web, "GRANTS_PATH", tmp_path / "grants.json")
+    grant_id = grant(client, refused(client)["cart_id"]).json()["grant"]["grant_id"]
+
+    web.GRANTS.clear()
+    web._CUSTOMER = None
+    web.load_grants()
+
+    assert web.GRANTS[grant_id].customer_id == "cust_1"

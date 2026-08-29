@@ -83,6 +83,13 @@ class Grant:
     merchant: str
     order_id: str | None
     key_id: str | None
+    #: Who Razorpay has the saved card against.
+    #:
+    #: On the grant rather than in a module global, because the global is empty
+    #: after a restart and the checkout then arrives with no customer — which
+    #: Razorpay reads as "new customer", so a card saved five minutes ago is
+    #: offered back as a blank Card Number field.
+    customer_id: str | None = None
     #: The lines that were approved, as they stood at that moment.
     #:
     #: A grant *is* a snapshot — you approved those lines at that total — so it
@@ -189,6 +196,7 @@ def save_grants() -> None:
             "merchant": g.merchant,
             "order_id": g.order_id,
             "key_id": g.key_id,
+            "customer_id": g.customer_id,
             "items": g.items,
             "payment_id": g.payment_id,
         }
@@ -220,6 +228,7 @@ def load_grants() -> None:
             merchant=raw["merchant"],
             order_id=raw.get("order_id"),
             key_id=raw.get("key_id"),
+            customer_id=raw.get("customer_id"),
             items=raw.get("items") or [],
             payment_id=raw.get("payment_id"),
         )
@@ -227,6 +236,12 @@ def load_grants() -> None:
 
 
 # Test-mode placeholders. A real deployment reads these off the signed-in user.
+# Left as it is deliberately. `9999999999` is refused by `POST /v1/payment_links`
+# ("Recurring digits in customer contact are disallowed") and is an ugly thing to
+# keep — but Standard Checkout accepts it, the saved card already sits against
+# the customer this creates, and changing the contact mints a *different*
+# customer that no token belongs to. That is a card the reader has to enter
+# again, traded for tidiness.
 DEMO_CUSTOMER = {
     "name": "Bounded Mandate Demo",
     "email": "demo@bounded-mandate.test",
@@ -571,6 +586,7 @@ def grant_once(body: GrantRequest) -> dict:
         merchant=cart.merchant,
         order_id=rendered.get("order_id"),
         key_id=rendered.get("key_id"),
+        customer_id=_CUSTOMER,
         items=rendered.get("items") or [],
     )
     GRANTS[grant_id] = grant
@@ -618,7 +634,7 @@ def read_grant(grant_id: str) -> dict:
         # their contact details and nothing else. A card number is not on this
         # list and cannot be — see `create_charge_order`.
         "prefill": {k: v for k, v in DEMO_CUSTOMER.items() if k in ("name", "email", "contact")},
-        "customer_id": _CUSTOMER,
+        "customer_id": grant.customer_id or _CUSTOMER,
         "payment_id": grant.payment_id,
         # From the grant's own snapshot, so the page shows what was approved
         # rather than whatever the shop happens to hold now.
