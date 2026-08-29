@@ -128,6 +128,8 @@ $("pay").onclick = () => {
     key: pending.key_id, order_id: pending.order_id,
     amount: pending.real_total_paise, currency: "INR",
     name: "Bounded Mandate", description: "Authorised grocery order",
+    // The same placeholders the server uses for `DEMO_CUSTOMER`. A real name,
+    // email and phone number have no business in a committed file.
     prefill: { name:"Bounded Mandate Demo", email:"demo@bounded-mandate.test", contact:"9999999999" },
     handler: async (r) => {
       try {
