@@ -33,6 +33,9 @@
   .msg.ok{background:rgba(62,207,142,.12);border:1px solid rgba(62,207,142,.3);color:var(--good)}
   .msg.err{background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.3);color:var(--bad)}
   .fine{color:var(--muted);font-size:12px;line-height:1.6;margin-top:14px}
+  .testcard{margin-top:16px;border-style:dashed}
+  .testcard .tag{color:var(--muted)}
+  .testcard row span:last-child{font-family:ui-monospace,monospace;color:var(--ink)}
 </style>
 </head>
 <body><main>
@@ -56,6 +59,16 @@
   <button id="pay" disabled>Pay</button>
   <p class="fine" id="fine">One payment, this basket only, and it lapses in fifteen
     minutes. Nothing here can be re-used and nothing here raises your standing rule.</p>
+
+  <div class="card testcard" id="testcard" hidden>
+    <div class="tag"><span>Test mode</span></div>
+    <row><span>Card</span><span id="tc">4100 2800 0000 1007</span></row>
+    <row><span>Expiry / CVV</span><span>any future date · any 3 digits</span></row>
+    <row><span>OTP</span><span>any 4–10 digits succeeds</span></row>
+    <p class="fine">Razorpay's own India test card. Tick <b>save this card</b> and the
+      next approval skips straight past it — Standard Checkout runs the CVV-less flow
+      on Visa, Mastercard and Amex. Test-mode tokens last 3 days.</p>
+  </div>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -89,6 +102,9 @@ async function load() {
   if (d.state !== "ready") { msg("The engine did not authorise this basket.", "err"); return; }
 
   $("pay").textContent = "Pay " + rupees(d.amount_paise);
+  // Shown only against a test key, so the demo does not need a second screen
+  // open to find out what to type. `rzp_test_` is Razorpay's own prefix.
+  $("testcard").hidden = !(d.key_id || "").startsWith("rzp_test_");
   $("fine").textContent =
     "Save the card and the next approval is a single tap — no CVV on Visa, Mastercard "
     + "or Amex, and the OTP autofills. A standing mandate skips this screen entirely.";

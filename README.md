@@ -722,6 +722,30 @@ freshly issued key pair**, and are corrected below rather than quietly deleted:
   of the key — verified by comparing `/v1/preferences` across an old and a new
   pair on the same account and getting an identical answer.
 
+### Saving a card, in test mode
+
+Charge orders now carry a `customer_id`, which is what Razorpay tokenises
+against. Without it the account had two captured payments and **zero saved
+cards**, so every checkout asked for a full card — our omission, not a property
+of hosted checkout.
+
+With it: the card is entered once, and Standard Checkout runs the **CVV-less
+flow by default** on tokenised Visa, Mastercard and Amex — no enablement
+request. So the second approval is a tap and an autofilled OTP.
+
+Test mode has everything needed to demonstrate this, and `/pay` shows it when
+the key is a `rzp_test_` one rather than making anybody go and look it up:
+
+| | |
+|---|---|
+| India test card | `4100 2800 0000 1007` (Visa) |
+| Expiry / CVV | any future date, any three digits |
+| OTP | any 4–10 digits succeeds; under 4 fails |
+| Token life | **3 days** in test mode |
+
+That last row is the one to plan a recorded demo around: a card saved on Monday
+is not saved on Friday.
+
 ### What the account does not yet permit
 
 `GET /v1/preferences?key_id=…` is the authority here — note it authenticates
