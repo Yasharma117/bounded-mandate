@@ -32,6 +32,27 @@ It is also free to lie: `request_charge` takes the total the agent *claims*, and
 the engine fetches the real cart to compare. A guard you cannot demonstrate
 failing is a guard nobody should believe.
 
+### In policy is not the same as wanted
+
+Found on camera: saying **"Hey hello"** in voice mode made the agent read the
+list, build a cart and put a real order on Razorpay's rails.
+
+The engine ruled it correctly — ₹1,850 of groceries at Instamart, squarely
+inside the mandate — and that is the part worth being precise about.
+**Containment held; restraint failed.** The engine bounds *what* may be bought,
+not *whether anyone asked*, and it cannot be made to tell the difference because
+that is not a question about authority.
+
+The cause was this file's own system prompt, which read as an unconditional
+procedure — *"Work in this order: 1… 2… 3…"* — with nothing gating it on having
+been asked for anything. It now decides first whether it is being asked to buy,
+and answers small talk with no tools at all. Three live tests pin it, including
+one that a greeting reaches the engine zero times.
+
+Two smaller things fell out of the same fix: it was building two carts per run
+and reporting an authorised order as *"placed successfully"*, which on this
+account is an order nobody has paid.
+
 ### Run against a live model
 
 Honest run, `nvidia/nemotron-3-super-120b-a12b`, 5.4s:
