@@ -151,6 +151,69 @@ class Offer:
 
 
 @dataclass(frozen=True)
+class Variant:
+    """One buyable pack of a product — the granularity `update_cart` accepts.
+
+    `search` flattens these into separate `Offer`s, which is right for building
+    a cart and wrong for a product page: it destroys the product→packs grouping
+    that a size selector *is*.
+    """
+
+    sku_id: str
+    spin_id: str
+    #: The full name a list line would carry, pack included.
+    name: str
+    #: Just the pack, for the tile: "1 ltr x 4".
+    label: str
+    price_paise: int
+    #: What it would cost without the offer. Equal to `price_paise` when there
+    #: is no discount, so a struck-through price is never invented.
+    mrp_paise: int
+    #: Swiggy's own comparison, e.g. "8.5/100 ml" — the only honest way to
+    #: compare a 500ml against a 1L against a six-pack.
+    unit_price: str
+    in_stock: bool
+    image_url: str = ""
+
+    @property
+    def off(self) -> int:
+        """Percent off, rounded. Zero when there is no discount."""
+        if self.mrp_paise <= self.price_paise:
+            return 0
+        return round((1 - self.price_paise / self.mrp_paise) * 100)
+
+
+@dataclass(frozen=True)
+class Listing:
+    """One product as a shop describes it, packs and all.
+
+    Everything here is read from a payload we already fetch and discard. The
+    mock supplies a thinner version of the same shape — no rating, no delivery
+    estimate, one pack — so the sheet degrades rather than inventing fields.
+    """
+
+    name: str
+    brand: str
+    image_url: str
+    variants: tuple[Variant, ...]
+    # Which shop is speaking. Live this is always Instamart; on the mock it is
+    # the field that keeps a seller's name out of the brand line.
+    merchant: str = ""
+    rating: str = ""
+    rating_count: str = ""
+    #: "18 MINS", as the shop says it.
+    sla: str = ""
+    #: `True`, `False`, or `None` when the shop does not classify it.
+    veg: bool | None = None
+    badges: tuple[str, ...] = ()
+
+    @property
+    def category(self) -> str:
+        """Ours, not the shop's, and it fails closed — same rule as everywhere."""
+        return categorise(self.name)
+
+
+@dataclass(frozen=True)
 class CartReport:
     """A cart, plus everything Swiggy quietly changed about it.
 
@@ -223,6 +286,57 @@ def _words(text: str) -> frozenset[str]:
         word
         for raw in re.split(r"[^a-z0-9]+", text.casefold())
         if (word := raw.strip("0123456789")) and word not in _NOISE
+    )
+
+
+def _listing(raw: dict) -> Listing | None:
+    """One product from a `search_products` row, packs intact."""
+    base = str(raw.get("displayName") or raw.get("brand") or "").strip()
+    variants: list[Variant] = []
+    for variation in raw.get("variations") or []:
+        sku, spin = variation.get("skuId"), variation.get("spinId")
+        price = (variation.get("price") or {}).get("offerPrice")
+        if not sku or not spin or price is None:
+            continue
+        pack = str(variation.get("quantityDescription") or "").strip()
+        offer = to_paise(price)
+        mrp = (variation.get("price") or {}).get("mrp")
+        variants.append(
+            Variant(
+                sku_id=str(sku),
+                spin_id=str(spin),
+                name=f"{base} {pack}".strip(),
+                label=pack or base,
+                price_paise=offer,
+                # Falls back to the price itself, so a struck-through figure is
+                # never shown where there is no discount.
+                mrp_paise=to_paise(mrp) if mrp is not None else offer,
+                unit_price=str((variation.get("price") or {}).get("unitLevelPrice") or ""),
+                in_stock=bool(variation.get("isInStockAndAvailable", True)),
+                image_url=_thumb(variation.get("imageUrl")),
+            )
+        )
+    if not base or not variants:
+        return None
+
+    first = (raw.get("variations") or [{}])[0]
+    rating = first.get("rating") or {}
+    sla = first.get("sla") or {}
+    veg = first.get("vegClassifier")
+    return Listing(
+        name=base,
+        brand=str(raw.get("brand") or ""),
+        image_url=variants[0].image_url,
+        variants=tuple(sorted(variants, key=lambda v: v.price_paise)),
+        rating=str(rating.get("value") or ""),
+        rating_count=str(rating.get("count") or ""),
+        sla=f"{sla.get('value')} {sla.get('unit')}".strip() if sla.get("value") else "",
+        veg=None if not veg else veg == "VEG_CLASSIFIER_VEG",
+        badges=tuple(
+            str(b.get("text"))
+            for b in (raw.get("badges") or [])
+            if isinstance(b, dict) and b.get("text")
+        ),
     )
 
 
@@ -325,6 +439,36 @@ class SwiggyAdapter:
                     )
                 )
         return offers
+
+    def describe(self, name: str) -> tuple[Listing | None, list[Listing]]:
+        """One product with its packs, and the products Swiggy calls similar.
+
+        A second read beside `search`, not a replacement for it. `search` is
+        right for building a cart — one row per sku, because that is what
+        `update_cart` takes — and exactly wrong for a product page, where the
+        packs of one product are the thing being chosen between.
+
+        Costs the same single `search_products` call `search` does.
+        """
+        payload = self._invoke("search_products", addressId=self.address_id(), query=name)
+        products = [_listing(raw) for raw in (payload.get("products") or [])]
+        products = [p for p in products if p is not None]
+        if not products:
+            return None, []
+
+        wanted = _words(name)
+        # The same rule the cart uses: most words in common, and never something
+        # with none of them.
+        chosen = max(products, key=lambda p: len(wanted & _words(p.name)))
+        if wanted and not (wanted & _words(chosen.name)):
+            return None, []
+
+        similar = [_listing(raw) for raw in (payload.get("similarProducts") or [])]
+        alternatives = [p for p in similar if p is not None and p.name != chosen.name]
+        # The rest of the search is a better neighbour list than nothing when
+        # Swiggy returns no `similarProducts` for a query.
+        alternatives += [p for p in products if p.name != chosen.name]
+        return chosen, alternatives[:12]
 
     def create_cart(
         self,

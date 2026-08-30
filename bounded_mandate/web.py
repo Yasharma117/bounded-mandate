@@ -984,56 +984,64 @@ def _search_term(name: str) -> str:
 
 @app.get("/api/product")
 def product_detail(name: str, merchant: str = MERCHANT_NAME) -> dict:
-    """One product in full, and the alternatives to it.
+    """One product, its packs, and what else would do.
 
-    Every row — the product and each alternative — carries `merchant_allowed`
-    and `category_allowed` separately, the same as the offers card. A shop can
-    be allowed while the thing it sells is not, and collapsing the two would
-    make the sheet name the wrong reason for the one thing it exists to help
-    someone choose.
+    Every pack carries **its own** verdict, because a cap is a number and packs
+    have different ones: `1 ltr` at ₹77 clears a ₹2,000 rule and `1 ltr x 12` at
+    ₹924 may not. Instamart's own sheet cannot say that; it is the one thing
+    this version knows that the shop does not, and it turns a size selector into
+    a place you can see what your rule reaches.
+
+    `merchant_allowed` and `category_allowed` stay separate for the reason the
+    offers card already keeps them separate — a shop can be allowed while the
+    thing it sells is not, and collapsing them names the wrong reason on the one
+    screen somebody opened in order to choose.
     """
-    item = _product(merchant, name)
-    if item is None:
-        raise HTTPException(404, "not stocked")
     policy = POLICIES["mdt_demo"]
-
-    def row(seller: str, thing) -> dict:
-        return {
-            "merchant": seller,
-            "name": thing.name,
-            "price_paise": thing.price_paise,
-            "category": thing.category,
-            "image_url": thing.image_url,
-            "url": f"/m/{seller}/p/{quote(thing.name)}",
-            "merchant_allowed": seller in policy.merchants,
-            "category_allowed": thing.category in policy.categories,
-        }
-
     try:
-        found = MARKETPLACE.search(_search_term(name))
+        listing, alternatives = MARKETPLACE.describe(name)
     except SHOP_DOWN as exc:
         raise shop_down(exc) from exc
-    alternatives = []
-    for offer in found:
-        seller, thing = _offer_parts(offer)
-        if thing.name == name and seller == merchant:
-            continue  # the product itself is not an alternative to itself
-        alternatives.append(row(seller, thing))
+    if listing is None:
+        raise HTTPException(404, "not stocked")
 
-    # Deliberately not topped up from the same category. Doing that offered curd
-    # as an alternative to atta, which is not an alternative — it is noise, on
-    # the one screen somebody opened in order to choose.
-    #
-    # What is left is the honest answer each backend can give. On the mock that
-    # is the same product at the other shops, which is what the mock exists to
-    # show: Blinkit undercuts Instamart on the staples, so the cheapest row and
-    # the allowed row are different rows. On live it is Instamart's own variants
-    # and similar products.
+    def pack(variant) -> dict:
+        return {
+            "sku_id": variant.sku_id,
+            "name": variant.name,
+            "label": variant.label,
+            "price_paise": variant.price_paise,
+            "mrp_paise": variant.mrp_paise,
+            "off": variant.off,
+            "unit_price": variant.unit_price,
+            "in_stock": variant.in_stock,
+            # The pack's own answer, which is the point of showing them together.
+            "within_cap": variant.price_paise <= policy.per_txn_max_paise,
+        }
+
+    def described(one, seller: str) -> dict:
+        return {
+            "name": one.name,
+            "brand": one.brand,
+            "merchant": seller,
+            "image_url": one.image_url,
+            "category": one.category,
+            "rating": one.rating,
+            "rating_count": one.rating_count,
+            "sla": one.sla,
+            "veg": one.veg,
+            "badges": list(one.badges),
+            "variants": [pack(v) for v in one.variants],
+            "merchant_allowed": seller in policy.merchants,
+            "category_allowed": one.category in policy.categories,
+        }
+
+    # On the mock an alternative is the same product at another shop and says
+    # so; live, it is another product at the shop we are already in.
+    here = merchant if is_live() else MERCHANT_NAME
     return {
-        "product": row(merchant, item),
-        # Cheapest first, but the policy's answer is on every row so "cheapest"
-        # and "allowed" can visibly disagree — which they are meant to.
-        "alternatives": sorted(alternatives, key=lambda a: a["price_paise"])[:12],
+        "product": described(listing, listing.merchant or here),
+        "alternatives": [described(alt, alt.merchant or here) for alt in alternatives],
         "comparable": not is_live(),
     }
 

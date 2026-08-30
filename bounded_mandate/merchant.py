@@ -255,6 +255,49 @@ class Marketplace:
             raise UnknownMerchant(f"no such shop: {merchant}. Shops are: {known}")
         return found
 
+    def describe(self, name: str):
+        """The mock's answer to the same question, and a thinner one.
+
+        One pack, no rating, no delivery estimate, no discount — because it has
+        none of those, and a product sheet that invented them would be lying
+        about a shop that does not exist. The alternatives are what the mock is
+        actually good for: the same product at the other two shops, where the
+        cheapest row is the one the rule refuses.
+        """
+        from .swiggy import Listing, Variant
+
+        def listing(seller: str, item) -> Listing:
+            return Listing(
+                name=item.name,
+                brand="",
+                merchant=seller,
+                image_url=item.image_url,
+                variants=(
+                    Variant(
+                        sku_id=f"{seller}:{item.name}",
+                        spin_id="",
+                        name=item.name,
+                        label="",
+                        price_paise=item.price_paise,
+                        mrp_paise=item.price_paise,
+                        unit_price="",
+                        in_stock=True,
+                        image_url=item.image_url,
+                    ),
+                ),
+            )
+
+        here = self.merchants.get(MERCHANT_NAME)
+        item = here.catalog.get(name) if here else None
+        if item is None:
+            return None, []
+        alternatives = [
+            listing(seller, shop.catalog[name])
+            for seller, shop in self.merchants.items()
+            if seller != MERCHANT_NAME and name in shop.catalog
+        ]
+        return listing(MERCHANT_NAME, item), alternatives
+
     def search(self, query: str) -> list[Offer]:
         """Every seller's answer, cheapest first within each product."""
         offers = [

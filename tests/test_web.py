@@ -715,10 +715,68 @@ def test_a_list_edit_is_not_validated_against_a_live_catalog(client, monkeypatch
 
 def test_a_product_carries_everything_needed_to_choose(client):
     out = client.get("/api/product", params={"name": "Aashirvaad atta 5kg"}).json()
+    product = out["product"]
 
-    assert out["product"]["price_paise"] == 27_500
-    assert out["product"]["image_url"].startswith("https://")
-    assert out["product"]["merchant_allowed"] and out["product"]["category_allowed"]
+    assert product["merchant_allowed"] and product["category_allowed"]
+    assert product["image_url"].startswith("https://")
+    assert [v["price_paise"] for v in product["variants"]] == [27_500]
+
+
+def test_every_pack_carries_its_own_verdict(client, monkeypatch):
+    """The one thing the shop's own sheet cannot tell you. A cap is a number and
+    packs have different ones, so the size selector is where you see what your
+    rule reaches — not a place that finds out afterwards."""
+
+    from bounded_mandate import web
+    from bounded_mandate.swiggy import Listing, Variant
+
+    def pack(label: str, paise: int) -> Variant:
+        return Variant(
+            sku_id=label,
+            spin_id="",
+            name=f"Toned milk {label}",
+            label=label,
+            price_paise=paise,
+            mrp_paise=paise,
+            unit_price="7.7/100 ml",
+            in_stock=True,
+        )
+
+    listing = Listing(
+        name="Amul Taaza Toned Milk",
+        brand="Amul",
+        image_url="",
+        variants=(pack("1 ltr", 7_700), pack("1 ltr x 12", 300_000)),
+    )
+    monkeypatch.setattr(web.MARKETPLACE, "describe", lambda name: (listing, []))
+    cap = web.POLICIES["mdt_demo"].per_txn_max_paise
+    assert 7_700 <= cap < 300_000, "the fixture no longer straddles the cap"
+
+    out = client.get("/api/product", params={"name": "Amul Taaza Toned Milk"}).json()
+
+    assert [v["within_cap"] for v in out["product"]["variants"]] == [True, False]
+
+
+def test_a_discount_is_shown_only_where_one_exists(client, monkeypatch):
+    """`mrp == offerPrice` on most lines. A struck price against an identical
+    figure reads as a saving that is not there."""
+    from bounded_mandate import web
+    from bounded_mandate.swiggy import Listing, Variant
+
+    listing = Listing(
+        name="Curd",
+        brand="",
+        image_url="",
+        variants=(
+            Variant("a", "", "Curd", "400 g", 6_900, 8_000, "", True),
+            Variant("b", "", "Curd", "1 kg", 15_000, 15_000, "", True),
+        ),
+    )
+    monkeypatch.setattr(web.MARKETPLACE, "describe", lambda name: (listing, []))
+
+    packs = client.get("/api/product", params={"name": "Curd"}).json()["product"]["variants"]
+
+    assert [p["off"] for p in packs] == [14, 0]
 
 
 def test_the_alternatives_are_the_same_thing_not_the_same_aisle(client):
@@ -730,15 +788,29 @@ def test_the_alternatives_are_the_same_thing_not_the_same_aisle(client):
     assert out["alternatives"], "no alternatives at all"
     assert all(a["name"] == "Aashirvaad atta 5kg" for a in out["alternatives"])
     assert {a["merchant"] for a in out["alternatives"]} == {"blinkit", "zepto"}
+    # Same product, other shops — so the sheet offers a swap, not a reload.
+    assert out["comparable"]
 
 
 def test_the_cheapest_alternative_is_the_one_the_rule_refuses(client):
     """The scene the mock exists for. Cheapest and allowed are different rows."""
     out = client.get("/api/product", params={"name": "Aashirvaad atta 5kg"}).json()
-    cheapest = min(out["alternatives"], key=lambda a: a["price_paise"])
+    price = lambda p: min(v["price_paise"] for v in p["variants"])  # noqa: E731
+    cheapest = min(out["alternatives"], key=price)
 
-    assert cheapest["price_paise"] < out["product"]["price_paise"]
+    assert price(cheapest) < price(out["product"])
     assert not cheapest["merchant_allowed"]
+
+
+def test_the_mock_does_not_invent_what_it_does_not_have(client):
+    """No rating, no delivery estimate, no discount, and a seller's name stays
+    out of the brand line. A sheet that filled those in would be describing a
+    shop that does not exist."""
+    out = client.get("/api/product", params={"name": "Aashirvaad atta 5kg"}).json()
+    everything = [out["product"], *out["alternatives"]]
+
+    assert all(p["rating"] == "" and p["sla"] == "" and p["brand"] == "" for p in everything)
+    assert all(v["off"] == 0 for p in everything for v in p["variants"])
 
 
 def test_a_widened_name_still_finds_the_product(client):
@@ -821,6 +893,10 @@ def test_a_shop_that_is_down_is_a_503_with_the_reason(client, monkeypatch):
 
     monkeypatch.setattr(web, "is_live", lambda: True)
     monkeypatch.setattr(web.MARKETPLACE, "search", refuse)
+    # The product sheet reads through `describe`, not `search` — a route that
+    # answered 404 here would say "we do not stock it" about a shop that simply
+    # is not answering, which is the mystery this test exists to prevent.
+    monkeypatch.setattr(web.MARKETPLACE, "describe", refuse)
 
     for path in ("/api/catalog?q=lays", "/api/product?name=Lays", "/m/instamart/p/Lays"):
         out = client.get(path)
