@@ -391,6 +391,102 @@ class TestNothingReachesCheckout:
         assert seen == []
 
 
+# --- attacks that are just two of something at once --------------------------
+
+
+class TestConcurrencyCannotUndoTheGuarantees:
+    """Both of these were found by an outside review and reproduced before they
+    were fixed. Neither needs a hostile agent — only two things happening at
+    once, which this app does on its own: every route that writes is a sync
+    `def` and so runs in anyio's threadpool, and the scheduler adds
+    `asyncio.to_thread(run_due_lists)` on every tick.
+    """
+
+    def test_the_chain_survives_concurrent_appends(self):
+        """**This broke.** `append` was read-head → compute → write with no
+        lock, so two threads inside it both read the same head and both minted
+        the same `seq`. 8 threads x 25 appends produced
+        `CHAIN BROKEN: entry 1: out-of-order seq 0`.
+
+        Which made it worse than an ordinary race: `/api/home` renders
+        `chain_intact`, so the failure mode was the tamper-evidence screen
+        accusing itself, in front of whoever was being shown the tamper
+        evidence.
+        """
+        import pathlib
+        import tempfile
+        import threading
+
+        from bounded_mandate.ledger import Ledger
+
+        ledger = Ledger(pathlib.Path(tempfile.mkdtemp()) / "ledger.jsonl")
+        start = threading.Barrier(8)
+
+        def hammer(who: int) -> None:
+            start.wait()  # go together, so the window is as wide as it gets
+            for i in range(25):
+                ledger.append({"who": who, "i": i})
+
+        threads = [threading.Thread(target=hammer, args=(n,)) for n in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert ledger.verify() == 200, "an append was lost or the chain reordered"
+
+    def test_one_cart_cannot_be_authorised_twice_at_once(self):
+        """**This broke, and it is the one that moves money.** The idempotency
+        key was always right; the check was not atomic with the write. Two
+        identical proposals arriving together both read `charged_keys` before
+        either recorded, so both saw the key absent and both returned ALLOW —
+        and `_settle` then created two Razorpay orders for one basket.
+
+        Measured at six concurrent copies: six ALLOWs. Adding a lock to `append`
+        alone did *not* fix it — serialising the write does nothing when the
+        read that decides is outside. The check and the write have to be one
+        critical section.
+        """
+        import pathlib
+        import tempfile
+        import threading
+        from datetime import UTC, datetime
+
+        from bounded_mandate.ledger import Ledger
+
+        shop = Marketplace()
+        cart = shop.create_cart(list(USUAL_GROCERIES), merchant="instamart")
+        ledger = Ledger(pathlib.Path(tempfile.mkdtemp()) / "ledger.jsonl")
+        proposal = Proposal("mdt_demo", cart.cart_id, cart.total_paise)
+        policies = {"mdt_demo": web.POLICIES["mdt_demo"]}
+
+        out: list = []
+        start = threading.Barrier(6)
+
+        def race() -> None:
+            start.wait()
+            out.append(
+                decide(
+                    proposal,
+                    policies=policies,
+                    adapter=shop,
+                    ledger=ledger,
+                    now=datetime.now(UTC),
+                )
+            )
+
+        threads = [threading.Thread(target=race) for _ in range(6)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        allowed = [d for d in out if d.verdict is Verdict.ALLOW]
+        assert len(allowed) == 1, f"{len(allowed)} authorisations of one cart"
+        assert all("duplicate.suppressed" in d.reason_code for d in out if d not in allowed)
+        ledger.verify()
+
+
 # --- attacks that need history ----------------------------------------------
 
 

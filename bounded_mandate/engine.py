@@ -393,28 +393,48 @@ def decide(
             )
         )
 
-    history = _history(ledger, policy, now)
-    if key in history.charged_keys:
-        reasons.append(
-            Reason("duplicate.suppressed", Verdict.DENY, "This cart was already authorised.")
+    # Everything that reads the ledger and then writes a verdict off what it
+    # read is one critical section. `duplicate.suppressed` is idempotency, and
+    # idempotency with a gap between the check and the write is not idempotency:
+    # two identical proposals arriving together both saw the key absent, both
+    # authorised, and both settled. Measured, before this lock existed — six
+    # concurrent copies of one cart returned six ALLOWs.
+    #
+    # `charges_in_window` and `recent_denials` have the same shape of bug in a
+    # quieter register: the Nth charge and the probe threshold are both counts
+    # read here and acted on below, so they belong inside too.
+    #
+    # ponytail: this holds the lock across `_semantic_reasons`, which is a
+    # network call to the model — so decisions serialise behind it. Free at one
+    # user and wrong at a thousand; hoist the semantic call above the lock and
+    # re-check the key under it if throughput ever matters.
+    with ledger.lock:
+        history = _history(ledger, policy, now)
+        if key in history.charged_keys:
+            reasons.append(
+                Reason("duplicate.suppressed", Verdict.DENY, "This cart was already authorised.")
+            )
+
+        reasons += _mandate_reasons(policy, now)
+        reasons += _policy_reasons(cart, policy, history.charges_in_window)
+        reasons += _probe_reason(history.recent_denials)
+
+        # The model runs only when the rules would otherwise wave this through,
+        # and only to narrow. Skipping it on an already-fatal proposal saves a
+        # call and changes no outcome.
+        if not any(r.verdict is Verdict.DENY for r in reasons):
+            reasons += _semantic_reasons(cart, policy, semantic_check)
+
+        verdict = max(
+            (r.verdict for r in reasons), key=lambda v: _SEVERITY[v], default=Verdict.ALLOW
         )
-
-    reasons += _mandate_reasons(policy, now)
-    reasons += _policy_reasons(cart, policy, history.charges_in_window)
-    reasons += _probe_reason(history.recent_denials)
-
-    # The model runs only when the rules would otherwise wave this through, and
-    # only to narrow. Skipping it on an already-fatal proposal saves a call and
-    # changes no outcome.
-    if not any(r.verdict is Verdict.DENY for r in reasons):
-        reasons += _semantic_reasons(cart, policy, semantic_check)
-
-    verdict = max((r.verdict for r in reasons), key=lambda v: _SEVERITY[v], default=Verdict.ALLOW)
-    return _record(
-        ledger,
-        Decision(verdict, tuple(reasons), policy.mandate_id, cart.cart_id, cart.total_paise, key),
-        now,
-    )
+        return _record(
+            ledger,
+            Decision(
+                verdict, tuple(reasons), policy.mandate_id, cart.cart_id, cart.total_paise, key
+            ),
+            now,
+        )
 
 
 def _record(ledger: Ledger, decision: Decision, now: datetime) -> Decision:

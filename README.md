@@ -1366,16 +1366,37 @@ Stated here because they will be stated in the demo video too:
   any goods, and no goods change hands. Bounded Mandate is the *payer-side
   authorization*; the single arrow in the architecture diagram is not allowed to
   imply the two legs are one.
-- Aggregate rolling-window spend limits, atomic reserve-then-commit for
-  concurrent proposals, and the full ledger state machine are **specified but
-  not built**. They are documented as such rather than implied as working.
+- Aggregate rolling-window spend limits and the full ledger state machine are
+  **specified but not built**. They are documented as such rather than implied
+  as working.
+- **Concurrent proposals are safe against double-authorisation, not against
+  double-spend.** The duplicate check and the write that satisfies it are one
+  critical section, so one basket authorises exactly once no matter how many
+  copies arrive together. Full reserve-then-commit against a *budget* — where
+  two different baskets each fit the cap alone but not together — is still not
+  built.
 
 ## Deliberate simplifications
 
 Marked in-source with `ponytail:` comments naming the ceiling and the upgrade
-path. Currently: the ledger is single-process with no file locking, and the
-frequency check does a full ledger scan per decision. Both are fine at demo
-volume and both have an obvious fix when they aren't.
+path. Currently: the frequency check does a full ledger scan per decision, and
+`decide` holds the ledger lock across the semantic model call, so decisions
+serialise behind it. Both are fine at demo volume and both have an obvious fix
+when they aren't.
+
+The ledger used to be listed here too, described as "single-process with no
+file locking, fine at demo volume". That was wrong in kind, and an outside
+review caught it. It was not a volume tradeoff but a threading bug, reachable
+at zero load: every route that writes is a sync `def` and so runs in anyio's
+threadpool, and the scheduler adds `asyncio.to_thread(run_due_lists)` every
+tick, so one tick overlapping one request was enough to break the chain — on
+the screen whose entire claim is tamper-evidence. The same missing lock meant
+two identical proposals arriving together both cleared the duplicate check and
+both authorised. Both are fixed and both have a test in `test_stress.py`.
+
+What remains true, and is the honest version of the original claim: the lock is
+per-process. The chain holds for one engine and would not survive
+`uvicorn --workers 2` — that needs an advisory file lock or SQLite.
 
 ## Licence
 

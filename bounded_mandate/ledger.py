@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -47,12 +48,32 @@ class ChainBroken(Exception):
 class Ledger:
     """A hash-chained JSONL ledger.
 
-    ponytail: single-process, no file locking. Fine for one engine process;
-    add an advisory lock (or move to SQLite) before running two.
+    `append` is serialised by a lock, and that is not a scalability nicety —
+    it is what makes the chain a chain. The write is read-head → compute →
+    append, so two threads interleaving inside it both read the same head and
+    both mint `seq`, and `verify()` then raises on its own output.
+
+    This is reachable at zero load, not at high volume: every route that writes
+    is a sync `def`, which FastAPI runs in anyio's threadpool, and the scheduler
+    adds `asyncio.to_thread(run_due_lists)` on every tick. One tick overlapping
+    one request is enough. Since `/api/home` renders `chain_intact`, the failure
+    mode was the tamper-evidence screen accusing itself.
+
+    ponytail: the lock is per-process, so it holds for one engine and not for
+    two. Take an advisory file lock (or move to SQLite) before running a second
+    worker — the guarantee this class advertises does not survive `--workers 2`.
     """
 
     def __init__(self, path: str | os.PathLike[str]) -> None:
         self.path = Path(path)
+        # Reentrant, and public: `append` takes it, and `decide` takes it
+        # *around* `append` to make the duplicate check and the write that
+        # satisfies it one critical section. A plain Lock would deadlock on the
+        # nested acquire.
+        #
+        # Not a `dataclass` field: a lock is per-instance machinery, and every
+        # caller shares one `Ledger` per process, which is what makes it work.
+        self.lock = threading.RLock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def entries(self) -> Iterator[Entry]:
@@ -71,20 +92,25 @@ class Ledger:
         return last
 
     def append(self, payload: dict[str, Any], *, now: datetime | None = None) -> Entry:
-        """Append one record and return it, chained to the current head."""
-        head = self.head()
-        seq = 0 if head is None else head.seq + 1
-        prev_hash = GENESIS_HASH if head is None else head.hash
-        ts = (now or datetime.now(UTC)).isoformat()
-        entry = Entry(
-            seq=seq,
-            ts=ts,
-            prev_hash=prev_hash,
-            hash=_digest(seq, ts, prev_hash, payload),
-            payload=payload,
-        )
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(asdict(entry), sort_keys=True, ensure_ascii=False) + "\n")
+        """Append one record and return it, chained to the current head.
+
+        The whole body is under the lock, including the read: reading the head
+        outside it and writing inside would serialise the wrong half.
+        """
+        with self.lock:
+            head = self.head()
+            seq = 0 if head is None else head.seq + 1
+            prev_hash = GENESIS_HASH if head is None else head.hash
+            ts = (now or datetime.now(UTC)).isoformat()
+            entry = Entry(
+                seq=seq,
+                ts=ts,
+                prev_hash=prev_hash,
+                hash=_digest(seq, ts, prev_hash, payload),
+                payload=payload,
+            )
+            with self.path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(asdict(entry), sort_keys=True, ensure_ascii=False) + "\n")
         return entry
 
     def verify(self) -> int:
