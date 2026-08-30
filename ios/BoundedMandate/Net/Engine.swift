@@ -61,6 +61,12 @@ enum Engine {
     }
 
     /// The audit trail, and whether the chain still verifies.
+    /// What the engine has done, aggregated off the same entries the chain
+    /// covers. A pure read — asking does not change the trail.
+    static func readStats() async throws -> Stats {
+        try await send("/api/stats", method: "GET")
+    }
+
     static func readLedger() async throws -> LedgerPage {
         try await send("/api/ledger", method: "GET")
     }

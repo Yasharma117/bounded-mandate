@@ -931,3 +931,67 @@ def test_a_shop_that_is_down_is_a_503_with_the_reason(client, monkeypatch):
         out = client.get(path)
         assert out.status_code == 503, f"{path} answered {out.status_code}"
         assert "OAuth" in out.json()["detail"]
+
+
+# --- what the engine has actually done ----------------------------------------
+
+
+def test_stats_are_derived_from_the_ledger_and_never_written(client):
+    """Every figure comes from decision entries written at the time. A number
+    that needed its own tracking could drift without the chain noticing; these
+    cannot, because they *are* the chain — so the route must not write."""
+    propose(client, USUAL, 185_000)
+    propose(client, [*USUAL, "Smartwatch"], 1_035_000)
+    before = client.get("/api/ledger").json()["entries"]
+
+    stats = client.get("/api/stats").json()
+
+    assert client.get("/api/ledger").json()["entries"] == before, "reading changed the ledger"
+    assert stats["decisions"] == stats["allowed"] + stats["refused"]
+    assert stats["chain"]["intact"]
+
+
+def test_stats_name_why_something_was_refused_not_just_that_it_was(client):
+    """ "Refused: 14" is not evidence of anything. Which line held is."""
+    propose(client, [*USUAL, "Smartwatch"], 1_035_000)
+
+    blocked = client.get("/api/stats").json()["blocked"]
+
+    assert blocked.get("outside your categories"), f"nothing named a category: {blocked}"
+    assert all(count > 0 for count in blocked.values()), "a zero should be absent, not shown"
+
+
+def test_a_lie_about_the_total_is_counted_as_one(client):
+    """The demo's headline attack has to appear in the headline numbers."""
+    propose(client, USUAL, 100)
+
+    assert client.get("/api/stats").json()["blocked"]["misreported totals caught"] == 1
+
+
+def test_one_basket_refused_twice_is_one_basket_held_back(client):
+    """Counting attempts rather than baskets would flatter the figure — an agent
+    that retries one refused cart ten times has not held back ten baskets.
+
+    Uses the engine directly because the mock mints a fresh id per `create_cart`,
+    so two proposals of identical items are two carts by the merchant's own
+    reckoning. Live, Swiggy's ids are content-addressed and the collapse happens
+    on its own; here the same cart is ruled on twice, which is the property.
+    """
+    from datetime import UTC, datetime
+
+    from bounded_mandate.engine import Proposal, decide
+
+    cart = web.MARKETPLACE.create_cart([*USUAL, "Smartwatch"], merchant="instamart")
+    for _ in range(2):
+        decide(
+            Proposal("mdt_demo", cart.cart_id, cart.total_paise),
+            policies=web.POLICIES,
+            adapter=web.MARKETPLACE,
+            ledger=web.LEDGER,
+            now=datetime.now(UTC),
+        )
+
+    stats = client.get("/api/stats").json()
+
+    assert stats["refused"] == 2, "both decisions should be recorded"
+    assert stats["held_back_paise"] == cart.total_paise, "the retry was counted twice"

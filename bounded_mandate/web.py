@@ -22,6 +22,7 @@ import json
 import os
 import re
 import secrets
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from html import escape
@@ -39,7 +40,7 @@ from .commerce import build as build_commerce
 from .commerce import is_live
 from .compiler import GrantRefused, compile_mandate, grant_for_cart
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
-from .ledger import Ledger
+from .ledger import ChainBroken, Ledger
 from .merchant import MERCHANT_NAME, UnknownItem, UnknownMerchant
 from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
 from .swiggy import ADDRESS_ID as SWIGGY_ADDRESS_ID
@@ -411,6 +412,81 @@ def ledger_entries() -> dict:
     except Exception:
         intact = False
     return {"chain_intact": intact, "entries": rows[-20:]}
+
+
+#: The refusals worth counting separately, because "refused" as one number says
+#: nothing about *why*. Each of these is a different claim about the product:
+#: the agent lied, the agent repeated itself, the rule held a line.
+_BLOCKS: dict[str, str] = {
+    "provenance.total_mismatch": "misreported totals caught",
+    "provenance.cart_not_found": "carts that did not exist",
+    "duplicate.suppressed": "duplicate charges suppressed",
+    "cap.exceeded": "over your cap",
+    "category.not_allowed": "outside your categories",
+    "merchant.not_allowed": "shops outside your rule",
+    "delivery.unknown_address": "sent to an address you never authorised",
+    "agent.probing": "bursts of probing escalated",
+    "grant.other_cart": "approvals spent on a different basket",
+}
+
+
+@app.get("/api/stats")
+def stats() -> dict:
+    """What the engine has actually done, counted off the ledger it already keeps.
+
+    Nothing here is recorded for the purpose of being counted — every figure is
+    derived from decision entries written at the time, which is the point. A
+    number that needed its own tracking could be wrong without the chain
+    noticing; these cannot be, because they are the chain.
+
+    So this route is deliberately a pure read. If it ever needs a write to
+    answer a question, that question does not belong here.
+    """
+    decisions, settled = [], 0
+    for entry in LEDGER.entries():
+        payload = entry.payload
+        if payload.get("event") == "SETTLED":
+            settled += 1
+        elif payload.get("verdict"):
+            decisions.append(payload)
+
+    allowed = [d for d in decisions if d["verdict"] == Verdict.ALLOW.value]
+    refused = [d for d in decisions if d["verdict"] != Verdict.ALLOW.value]
+
+    # By cart, not by decision: an agent that retries one refused basket has not
+    # held back that money twice, and counting attempts would flatter the figure.
+    #
+    # How well this collapses is the merchant's choice, not ours. Swiggy's cart
+    # ids are content-addressed — `sha256(lines ‖ total)` — so the identical
+    # basket proposed twice is one id and counts once. The mock mints a fresh
+    # sequential id per `create_cart`, so there it counts twice, which is the
+    # merchant's own answer to "is this the same basket" and not ours to
+    # second-guess.
+    def summed(rows: list[dict]) -> int:
+        return sum({d["cart_id"]: d.get("total_paise", 0) for d in rows}.values())
+
+    codes = Counter(
+        reason["code"] for d in decisions for reason in d.get("reasons", ()) if reason.get("code")
+    )
+
+    try:
+        chain = {"entries": LEDGER.verify(), "intact": True}
+    except ChainBroken as exc:
+        chain = {"entries": 0, "intact": False, "detail": str(exc)}
+
+    return {
+        "decisions": len(decisions),
+        "allowed": len(allowed),
+        "refused": len(refused),
+        "by_verdict": dict(Counter(d["verdict"] for d in decisions)),
+        "authorised_paise": summed(allowed),
+        # The number the product exists to produce: money an autonomous agent
+        # asked for and did not get.
+        "held_back_paise": summed(refused),
+        "blocked": {label: codes[code] for code, label in _BLOCKS.items() if codes[code]},
+        "settlements": settled,
+        "chain": chain,
+    }
 
 
 @app.post("/api/mandate/compile")

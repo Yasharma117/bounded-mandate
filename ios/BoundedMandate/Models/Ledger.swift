@@ -62,3 +62,36 @@ struct LedgerPage: Decodable, Sendable {
         case chainIntact = "chain_intact"
     }
 }
+
+/// What the engine has actually done, counted off the ledger it already keeps.
+///
+/// Every figure is derived from decision entries written at the time — nothing
+/// here is recorded for the purpose of being counted. That is the point: a
+/// number kept in its own tally could drift without the chain noticing, and
+/// these cannot, because they *are* the chain.
+struct Stats: Decodable, Sendable {
+    let decisions: Int
+    let allowed: Int
+    let refused: Int
+    let authorisedPaise: Int
+    /// Money an autonomous agent asked for and did not get. The number the
+    /// product exists to produce.
+    let heldBackPaise: Int
+    /// Why something was refused, not merely that it was — keyed by a phrase
+    /// already written for a reader. Zero counts are absent, not shown as zero.
+    let blocked: [String: Int]
+    let settlements: Int
+
+    /// Most-blocked first, then alphabetically so the order is stable between
+    /// refreshes rather than jumping as counts tie.
+    var reasons: [(label: String, count: Int)] {
+        blocked.sorted { ($0.value, $1.key) > ($1.value, $0.key) }
+            .map { (label: $0.key, count: $0.value) }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case decisions, allowed, refused, blocked, settlements
+        case authorisedPaise = "authorised_paise"
+        case heldBackPaise = "held_back_paise"
+    }
+}
