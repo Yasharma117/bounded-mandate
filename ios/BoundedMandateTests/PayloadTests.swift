@@ -425,6 +425,45 @@ struct CardCopyTests {
         #expect(!decision.grantable)
     }
 
+    // MARK: - the rule, as the controls that set it will read it
+
+    @Test func theRuleCarriesItsOwnCeilingAndOptions() throws {
+        """
+        The editor cannot be built from what the home screen already has: it
+        needs the ceiling and the option lists, and both are the engine's to
+        decide. A client that hardcoded them could offer a shop the commerce
+        backend cannot reach.
+        """
+        let rule = try decode(RuleBounds.self, "rule")
+
+        #expect(rule.perTxnMaxPaise > 0)
+        #expect(rule.maxCapPaise > rule.perTxnMaxPaise)
+        #expect(!rule.merchantOptions.isEmpty)
+        #expect(!rule.categoryOptions.isEmpty)
+        // Everything already on the rule must be offerable, or an edit screen
+        // would silently drop a bound it did not know how to show.
+        #expect(Set(rule.merchants).isSubset(of: Set(rule.merchantOptions)))
+        #expect(Set(rule.categories).isSubset(of: Set(rule.categoryOptions)))
+    }
+
+    @Test func feesAreNeverOfferedAsSomethingTheUserChose() throws {
+        // The engine adds it to every policy; it is not the user's to pick.
+        let rule = try decode(RuleBounds.self, "rule")
+
+        #expect(!rule.categories.contains("fees"))
+        #expect(!rule.categoryOptions.contains("fees"))
+    }
+
+    @Test func theCapSurvivesTheRoundTripThroughTheField() throws {
+        """
+        The field shows what the engine holds and sends back what was typed. If
+        those disagree by a paisa, the user set a bound they did not read.
+        """
+        let rule = try decode(RuleBounds.self, "rule")
+
+        #expect(paise(from: typedAmount(rule.perTxnMaxPaise)) == rule.perTxnMaxPaise)
+    }
+
     // MARK: - one product, and what else would do
 
     @Test func aProductCarriesEverythingNeededToChoose() throws {
@@ -434,7 +473,24 @@ struct CardCopyTests {
         #expect(detail.product.imageURL?.hasPrefix("https://") == true)
         #expect(detail.product.buyable)
         #expect(detail.product.blockedReason == nil)
+        #expect(!detail.product.variants.isEmpty)
         #expect(!detail.alternatives.isEmpty)
+    }
+
+    @Test func everyPackCarriesItsOwnVerdict() throws {
+        """
+        The thing the shop's own sheet cannot tell you. A cap is a number and
+        packs have different ones, so the verdict belongs on the tile and not
+        on the product.
+        """
+        let detail = try decode(ProductDetail.self, "product")
+        let pack = try #require(detail.product.variants.first)
+
+        #expect(pack.pricePaise > 0)
+        #expect(pack.withinCap)
+        // No discount in the mock, so no struck price should be implied.
+        #expect(!pack.discounted)
+        #expect(pack.mrpPaise == pack.pricePaise)
     }
 
     @Test func theCheapestAlternativeIsOftenTheOneYourRuleRefuses() throws {
@@ -444,11 +500,12 @@ struct CardCopyTests {
         Collapsing shop and category into one flag would name the wrong reason.
         """
         let detail = try decode(ProductDetail.self, "product")
-        let cheapest = try #require(detail.alternatives.min { $0.pricePaise < $1.pricePaise })
+        let price = { (p: Product) in p.cheapest?.pricePaise ?? .max }
+        let cheapest = try #require(detail.alternatives.min { price($0) < price($1) })
 
-        #expect(cheapest.pricePaise < detail.product.pricePaise)
+        #expect(price(cheapest) < price(detail.product))
         #expect(!cheapest.buyable)
-        #expect(cheapest.blockedReason?.contains("not on your list") == true)
+        #expect(cheapest.blockedReason?.contains("not a shop your rule covers") == true)
     }
 
     @Test func everyAlternativeShowsAPictureAndItsOwnVerdict() throws {

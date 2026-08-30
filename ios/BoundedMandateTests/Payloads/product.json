@@ -1,35 +1,86 @@
 {
- "product": {
-  "merchant": "instamart",
-  "name": "Aashirvaad atta 5kg",
-  "price_paise": 27500,
-  "category": "groceries",
-  "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/3/9/805a02b1-e08b-4d4b-aa8f-ab05cabb1e37_1780_1.png",
-  "url": "/m/instamart/p/Aashirvaad%20atta%205kg",
-  "merchant_allowed": true,
-  "category_allowed": true
- },
- "alternatives": [
-  {
-   "merchant": "blinkit",
-   "name": "Aashirvaad atta 5kg",
-   "price_paise": 25900,
-   "category": "groceries",
-   "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/3/9/805a02b1-e08b-4d4b-aa8f-ab05cabb1e37_1780_1.png",
-   "url": "/m/blinkit/p/Aashirvaad%20atta%205kg",
-   "merchant_allowed": false,
-   "category_allowed": true
+  "product": {
+    "name": "Aashirvaad atta 5kg",
+    "brand": "",
+    "merchant": "instamart",
+    "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/3/9/805a02b1-e08b-4d4b-aa8f-ab05cabb1e37_1780_1.png",
+    "category": "groceries",
+    "rating": "",
+    "rating_count": "",
+    "sla": "",
+    "veg": null,
+    "badges": [],
+    "variants": [
+      {
+        "sku_id": "instamart:Aashirvaad atta 5kg",
+        "name": "Aashirvaad atta 5kg",
+        "label": "",
+        "price_paise": 27500,
+        "mrp_paise": 27500,
+        "off": 0,
+        "unit_price": "",
+        "in_stock": true,
+        "within_cap": true
+      }
+    ],
+    "merchant_allowed": true,
+    "category_allowed": true
   },
-  {
-   "merchant": "zepto",
-   "name": "Aashirvaad atta 5kg",
-   "price_paise": 26800,
-   "category": "groceries",
-   "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/3/9/805a02b1-e08b-4d4b-aa8f-ab05cabb1e37_1780_1.png",
-   "url": "/m/zepto/p/Aashirvaad%20atta%205kg",
-   "merchant_allowed": false,
-   "category_allowed": true
-  }
- ],
- "comparable": true
+  "alternatives": [
+    {
+      "name": "Aashirvaad atta 5kg",
+      "brand": "",
+      "merchant": "blinkit",
+      "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/3/9/805a02b1-e08b-4d4b-aa8f-ab05cabb1e37_1780_1.png",
+      "category": "groceries",
+      "rating": "",
+      "rating_count": "",
+      "sla": "",
+      "veg": null,
+      "badges": [],
+      "variants": [
+        {
+          "sku_id": "blinkit:Aashirvaad atta 5kg",
+          "name": "Aashirvaad atta 5kg",
+          "label": "",
+          "price_paise": 25900,
+          "mrp_paise": 25900,
+          "off": 0,
+          "unit_price": "",
+          "in_stock": true,
+          "within_cap": true
+        }
+      ],
+      "merchant_allowed": false,
+      "category_allowed": true
+    },
+    {
+      "name": "Aashirvaad atta 5kg",
+      "brand": "",
+      "merchant": "zepto",
+      "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2026/3/9/805a02b1-e08b-4d4b-aa8f-ab05cabb1e37_1780_1.png",
+      "category": "groceries",
+      "rating": "",
+      "rating_count": "",
+      "sla": "",
+      "veg": null,
+      "badges": [],
+      "variants": [
+        {
+          "sku_id": "zepto:Aashirvaad atta 5kg",
+          "name": "Aashirvaad atta 5kg",
+          "label": "",
+          "price_paise": 26800,
+          "mrp_paise": 26800,
+          "off": 0,
+          "unit_price": "",
+          "in_stock": true,
+          "within_cap": true
+        }
+      ],
+      "merchant_allowed": false,
+      "category_allowed": true
+    }
+  ],
+  "comparable": true
 }

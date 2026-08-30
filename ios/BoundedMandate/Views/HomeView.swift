@@ -103,7 +103,14 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showingLedger) { LedgerSheet() }
             .sheet(isPresented: $showingRule) {
-                if let home = store.home { RuleSheet(rule: home.rule, lists: home.lists) }
+                if let home = store.home {
+                    RuleSheet(rule: home.rule, lists: home.lists) {
+                        // A committed rule changes what the cards mean — the
+                        // cap on the pots, the headline, the strip. Reload from
+                        // the engine rather than patching what is on screen.
+                        Task { await store.load() }
+                    }
+                }
             }
             .sheet(isPresented: $showingBasket) {
                 if let decision = store.home?.decision {

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from bounded_mandate import web
 from bounded_mandate.basket import USUAL_GROCERIES
+from bounded_mandate.categories import FEES
 from bounded_mandate.engine import Proposal, Verdict, decide
 from bounded_mandate.razorpay_gateway import GatewayAuthError, GatewayError, SignatureMismatch
 from tests.conftest import FakeGateway  # noqa: F401  — used by tests below
@@ -995,3 +996,101 @@ def test_one_basket_refused_twice_is_one_basket_held_back(client):
 
     assert stats["refused"] == 2, "both decisions should be recorded"
     assert stats["held_back_paise"] == cart.total_paise, "the retry was counted twice"
+
+
+# --- the rule is set by the user, not read out of a sentence -------------------
+
+
+def test_committing_a_rule_changes_what_the_engine_enforces(client):
+    client.put(
+        "/api/mandate",
+        json={
+            "per_txn_max_paise": 250_000,
+            "merchants": ["Instamart", " blinkit "],
+            "categories": ["Groceries"],
+            "every_days": 7,
+        },
+    )
+
+    policy = web.POLICIES["mdt_demo"]
+    assert policy.per_txn_max_paise == 250_000
+    # Normalised server-side, so typing "Instamart" is not a different shop.
+    assert policy.merchants == frozenset({"instamart", "blinkit"})
+    assert policy.window_days == 7
+
+
+def test_compiling_a_sentence_creates_no_authority(client):
+    """The seam this closes. `/api/mandate/compile` reads an utterance with a
+    model; if that could install a bound, a misread "₹2,000" would be enforced
+    faithfully forever and the only thing in the way would be someone reading a
+    card carefully."""
+    before = web.POLICIES["mdt_demo"]
+
+    client.post("/api/mandate/compile", json={"text": "spend up to ₹90,000 anywhere, daily"})
+
+    assert web.POLICIES["mdt_demo"] == before, "compiling wrote a bound"
+
+
+def test_a_bound_the_user_did_not_restate_is_refused(client):
+    """Not optional-and-merged like a schedule edit. A partial edit means
+    trusting a number nobody restated, and this is the payload where every
+    figure has to be one a person put there deliberately."""
+    assert client.put("/api/mandate", json={"per_txn_max_paise": 250_000}).status_code == 422
+
+
+def test_a_stray_zero_is_refused_rather_than_enforced(client):
+    """The ceiling is here to catch a typo at the boundary, not to have an
+    opinion about how much somebody may spend."""
+    over = {
+        "per_txn_max_paise": web.MAX_CAP_PAISE + 1,
+        "merchants": ["instamart"],
+        "categories": ["groceries"],
+        "every_days": 4,
+    }
+
+    assert client.put("/api/mandate", json=over).status_code == 422
+
+
+def test_a_rule_cannot_be_emptied_of_shops_or_categories(client):
+    """An empty allowlist is not a permissive rule, it is an unenforceable one —
+    and the shape that reads most like "no restrictions" to a careless caller."""
+    base = {"per_txn_max_paise": 200_000, "every_days": 4}
+    for hole in (
+        {"merchants": [], "categories": ["groceries"]},
+        {"merchants": ["instamart"], "categories": []},
+        {"merchants": ["   "], "categories": ["groceries"]},
+    ):
+        assert client.put("/api/mandate", json={**base, **hole}).status_code == 422, hole
+
+
+def test_the_rule_the_controls_show_is_the_rule_the_engine_holds(client):
+    """One shape for both, so an edit screen cannot describe a policy that is
+    not the one being enforced."""
+    view = client.get("/api/mandate").json()
+    policy = web.POLICIES["mdt_demo"]
+
+    assert view["per_txn_max_paise"] == policy.per_txn_max_paise
+    assert set(view["merchants"]) == set(policy.merchants)
+    assert view["every_days"] == policy.window_days
+    # `fees` is the engine's, not the user's — never offered as their choice.
+    assert FEES not in view["categories"]
+    assert FEES in policy.categories
+
+
+def test_delivery_cannot_be_set_through_the_rule_route(client):
+    """It is authority too, and it has its own route that checks the address is
+    one the account actually holds. A second way in would be the weaker one."""
+    before = web.POLICIES["mdt_demo"].delivery_addresses
+
+    client.put(
+        "/api/mandate",
+        json={
+            "per_txn_max_paise": 200_000,
+            "merchants": ["instamart"],
+            "categories": ["groceries"],
+            "every_days": 4,
+            "delivery_addresses": ["../office"],
+        },
+    )
+
+    assert web.POLICIES["mdt_demo"].delivery_addresses == before

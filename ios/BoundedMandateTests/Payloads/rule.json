@@ -1,0 +1,26 @@
+{
+  "per_txn_max_paise": 200000,
+  "merchants": [
+    "instamart"
+  ],
+  "categories": [
+    "groceries"
+  ],
+  "every_days": 4,
+  "orders_per_window": 1,
+  "delivery_addresses": [
+    "home"
+  ],
+  "max_cap_paise": 10000000,
+  "merchant_options": [
+    "blinkit",
+    "instamart",
+    "zepto"
+  ],
+  "category_options": [
+    "electronics",
+    "groceries",
+    "household",
+    "personal care"
+  ]
+}

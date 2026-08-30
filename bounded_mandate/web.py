@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 
 from .agent import ADVERSARIAL_SYSTEM, BuyerAgent
 from .basket import ListKind, ShoppingList, seed_addresses, seed_lists
-from .categories import FEES, with_fees
+from .categories import FEES, KNOWN, with_fees
 from .commerce import build as build_commerce
 from .commerce import is_live
 from .compiler import GrantRefused, compile_mandate, grant_for_cart
@@ -131,9 +131,13 @@ MARKETPLACE = build_commerce()
 # The user's lists. Owned by the user, read by the agent, and there is no route
 # and no agent tool that lets the agent write one — see `basket`.
 LISTS: dict[str, ShoppingList] = seed_lists()
+#: The standing mandate. One in this build; a name rather than a literal so the
+#: routes that read and write it cannot drift apart from the one that seeds it.
+MANDATE_ID = "mdt_demo"
+
 POLICIES: dict[str, Policy] = {
-    "mdt_demo": Policy(
-        mandate_id="mdt_demo",
+    MANDATE_ID: Policy(
+        mandate_id=MANDATE_ID,
         per_txn_max_paise=200_000,
         merchants=frozenset({"instamart"}),
         categories=with_fees({"groceries"}),
@@ -386,6 +390,27 @@ class OrderRequest(BaseModel):
     max_amount_paise: int = Field(gt=0, description="The user's per-order cap, in paise")
 
 
+#: A per-order cap above this is a typo, not a rule. The ceiling exists to catch
+#: a stray zero at the boundary rather than to have an opinion about how much
+#: somebody may spend — which is why it is generous and not clever.
+MAX_CAP_PAISE = 10_000_000  # ₹1,00,000
+
+
+class RuleEdit(BaseModel):
+    """The standing rule as the *user* sets it. Every field is required.
+
+    Not optional-and-merged like `Schedule`, on purpose: a partial edit to a
+    bound means the caller is trusting a value they did not restate, and this
+    is the one payload where every number has to be something a person put
+    there deliberately. Restating all four is the point, not an inconvenience.
+    """
+
+    per_txn_max_paise: int = Field(gt=0, le=MAX_CAP_PAISE)
+    merchants: list[str] = Field(min_length=1)
+    categories: list[str] = Field(min_length=1)
+    every_days: int = Field(ge=1, le=365)
+
+
 class Callback(BaseModel):
     razorpay_order_id: str = Field(min_length=1)
     razorpay_payment_id: str = Field(min_length=1)
@@ -507,6 +532,86 @@ def compile_rule(body: Utterance) -> dict:
             "categories": draft.categories,
         },
     }
+
+
+@app.put("/api/mandate")
+def set_rule(body: RuleEdit) -> dict:
+    """Commit the standing rule. **This is where authority is created.**
+
+    The compiler proposes and this decides — the same shape as the agent and the
+    engine, applied to the one path where it was not. `/api/mandate/compile`
+    reads a sentence with a model and hands back a draft to fill controls with;
+    every bound that becomes authority arrives here, from those controls, as a
+    number or a name the account holder set.
+
+    Which closes the one seam in the design. A model that misread "₹2,000" as
+    ₹2,00,000 used to produce a rule that looked right on a card and would have
+    been enforced faithfully forever, and the only thing standing between that
+    and the money was somebody reading carefully. Now the model cannot write a
+    bound at all: it can be wrong in the draft, and the wrongness dies at the
+    control the user touches.
+
+    `delivery_addresses` is deliberately absent. It is authority too, and it has
+    its own route (`PUT /api/address`) that checks the address is one the
+    account actually holds — letting it in here would be a second way to set it,
+    and the weaker one.
+    """
+    current = POLICIES[MANDATE_ID]
+    clean = lambda names: frozenset(n.strip().casefold() for n in names if n.strip())  # noqa: E731
+    merchants, categories = clean(body.merchants), clean(body.categories)
+    if not merchants or not categories:
+        raise HTTPException(422, "a rule needs at least one shop and one category")
+
+    POLICIES[MANDATE_ID] = replace(
+        current,
+        per_txn_max_paise=body.per_txn_max_paise,
+        merchants=merchants,
+        # `with_fees` here for the same reason it is everywhere else: a delivery
+        # charge is not a discretionary purchase, and a user who lists their
+        # categories should not have to remember it.
+        categories=with_fees(categories),
+        window_days=body.every_days,
+    )
+    return _rule_view(POLICIES[MANDATE_ID])
+
+
+@app.get("/api/mandate")
+def read_rule() -> dict:
+    """The standing rule as it is actually enforced, for the controls to open on."""
+    return _rule_view(POLICIES[MANDATE_ID])
+
+
+def _rule_view(policy: Policy) -> dict:
+    """One shape for the rule, so what the controls show is what the engine holds."""
+    return {
+        "per_txn_max_paise": policy.per_txn_max_paise,
+        # Sorted so the controls do not reshuffle between reads — `frozenset`
+        # has no order and the card would flicker.
+        "merchants": sorted(policy.merchants),
+        # `fees` is added by the engine and is not the user's to edit, so it is
+        # not shown as one of their choices.
+        "categories": sorted(policy.categories - {FEES}),
+        "every_days": policy.window_days,
+        "orders_per_window": policy.max_charges_per_window,
+        "delivery_addresses": sorted(policy.delivery_addresses),
+        "max_cap_paise": MAX_CAP_PAISE,
+        # The options the controls offer. Served rather than hardcoded in the
+        # client so a shop the engine cannot reach is never presented as a
+        # choice — and so the two cannot drift.
+        "merchant_options": _shops(),
+        "category_options": list(KNOWN),
+    }
+
+
+def _shops() -> list[str]:
+    """Which shops this build can actually reach.
+
+    Live is Instamart alone; the mock has three. Offering a rule the commerce
+    backend cannot honour would be a control that produces refusals rather than
+    purchases.
+    """
+    known = getattr(MARKETPLACE, "merchants", None)
+    return sorted(known) if known else [MERCHANT_NAME]
 
 
 @app.post("/api/mandate/order")

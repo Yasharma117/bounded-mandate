@@ -61,6 +61,29 @@ enum Engine {
     }
 
     /// The audit trail, and whether the chain still verifies.
+    /// The standing rule as the engine holds it, with the options the controls
+    /// may offer.
+    static func readRule() async throws -> RuleBounds {
+        try await send("/api/mandate", method: "GET")
+    }
+
+    /// Commit the standing rule. **This is where authority is created** — every
+    /// bound here is one the account holder set, never one a model read out of
+    /// a sentence.
+    static func setRule(
+        capPaise: Int, merchants: [String], categories: [String], everyDays: Int
+    ) async throws -> RuleBounds {
+        try await send(
+            "/api/mandate", method: "PUT",
+            body: [
+                "per_txn_max_paise": capPaise,
+                "merchants": merchants,
+                "categories": categories,
+                "every_days": everyDays,
+            ]
+        )
+    }
+
     /// What the engine has done, aggregated off the same entries the chain
     /// covers. A pure read — asking does not change the trail.
     static func readStats() async throws -> Stats {

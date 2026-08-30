@@ -7,8 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		06119404FFF72BD34F525D74 /* rule.json in Resources */ = {isa = PBXBuildFile; fileRef = 341A307067548DD3C861C137 /* rule.json */; };
 		079ADA24D717E9A4B7C0DE1A /* Motion.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC9ABAF932C45378D9A51EB1 /* Motion.swift */; };
 		0838E6F4B94A28BCB7E5870D /* Home.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ECAB4BEC7219BD2FE7B6DF8 /* Home.swift */; };
+		0B80CABAE65A8AEA9DFAA3B0 /* RuleEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 601FE2D91F1E4C287B28B915 /* RuleEditor.swift */; };
 		1014689A9ED39A18BCF9CD06 /* Voice.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9774A61A14E72CF37180810 /* Voice.swift */; };
 		1A4845C7B3965BFAF1B1BB05 /* Decision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 461AAC29A571034CD100B1F6 /* Decision.swift */; };
 		1ECD29654D72BE57A4CBD93C /* grant.json in Resources */ = {isa = PBXBuildFile; fileRef = 9FC75673669DB63D1D565AD6 /* grant.json */; };
@@ -39,8 +41,10 @@
 		9D05E8A565CBB7823A87B82A /* DecisionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 309C0A10C6372B326D0D6D3F /* DecisionCard.swift */; };
 		9E4163CA007B7EC3036FDF25 /* home_at_rest.json in Resources */ = {isa = PBXBuildFile; fileRef = 207DF571292C7E04D37A3559 /* home_at_rest.json */; };
 		A076D5C01A07E48990CC13E9 /* decision_live.json in Resources */ = {isa = PBXBuildFile; fileRef = FFC7C64DB646CF41394D92D3 /* decision_live.json */; };
+		A79301E7B1125A4DE4AD7FCC /* Rule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03F6B960853107890BB24D10 /* Rule.swift */; };
 		A9B206E52ED4D6D94F33B200 /* ListDraftCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331423EC6994EAC1430CE747 /* ListDraftCard.swift */; };
 		ADE569289D879E5AE7AF9EE8 /* VoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08994E31838B4504D06AEDCB /* VoiceSession.swift */; };
+		B3B11C6329DE668F17B3812A /* AmountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E4EF06C1F8824F03E4A02D1 /* AmountTests.swift */; };
 		B3CCBE7DE4AF8D06C7DF3D2D /* Surfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FE80D8D802D5B02E2DF3C0 /* Surfaces.swift */; };
 		B80B197A1F70F4625A02EC9D /* home_ruled.json in Resources */ = {isa = PBXBuildFile; fileRef = 4AE916CDA0C1513FDF5A4A2C /* home_ruled.json */; };
 		B89B81EFC730E92C5C6317EA /* turn_deny.json in Resources */ = {isa = PBXBuildFile; fileRef = FBE069DC68F919F6052214CE /* turn_deny.json */; };
@@ -74,6 +78,7 @@
 
 /* Begin PBXFileReference section */
 		02B4E4527B89DF50412E2CFA /* home_preflight.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = home_preflight.json; sourceTree = "<group>"; };
+		03F6B960853107890BB24D10 /* Rule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rule.swift; sourceTree = "<group>"; };
 		06DE233A9339DC5D9DBBE6CD /* Engine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Engine.swift; sourceTree = "<group>"; };
 		08994E31838B4504D06AEDCB /* VoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSession.swift; sourceTree = "<group>"; };
 		0D9CCE3AA2DB88B63F3F5AE3 /* RuleSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleSheet.swift; sourceTree = "<group>"; };
@@ -87,6 +92,7 @@
 		278C11735D563466BFE3313F /* AddressSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddressSheet.swift; sourceTree = "<group>"; };
 		309C0A10C6372B326D0D6D3F /* DecisionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecisionCard.swift; sourceTree = "<group>"; };
 		331423EC6994EAC1430CE747 /* ListDraftCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListDraftCard.swift; sourceTree = "<group>"; };
+		341A307067548DD3C861C137 /* rule.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = rule.json; sourceTree = "<group>"; };
 		3C858017986FE5EA163470CF /* DeliveryAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeliveryAddress.swift; sourceTree = "<group>"; };
 		3C85C718687F97BF21E8BF88 /* home_paid.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = home_paid.json; sourceTree = "<group>"; };
 		423CA0BC96E08241A6551777 /* home_refused.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = home_refused.json; sourceTree = "<group>"; };
@@ -100,6 +106,8 @@
 		547E104CAEC12ADCF7194C89 /* offers_category_blocked.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = offers_category_blocked.json; sourceTree = "<group>"; };
 		5A0CB6B22ECC7C92AAF31047 /* home_grant_live.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = home_grant_live.json; sourceTree = "<group>"; };
 		5CA999F0E4F1107AB9F2B438 /* ListSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListSheet.swift; sourceTree = "<group>"; };
+		5E4EF06C1F8824F03E4A02D1 /* AmountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmountTests.swift; sourceTree = "<group>"; };
+		601FE2D91F1E4C287B28B915 /* RuleEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleEditor.swift; sourceTree = "<group>"; };
 		604D1D9736A19B511A0F3FF3 /* product.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = product.json; sourceTree = "<group>"; };
 		607154604E21A84A7DDFA83C /* grant_checkout.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = grant_checkout.json; sourceTree = "<group>"; };
 		65F3DEBE3C2F147F07F33CE0 /* BoundedMandateTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BoundedMandateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -161,6 +169,7 @@
 				1EA33E9B6CFE9D623F014033 /* OffersCard.swift */,
 				EDB1665E8379391B01B4C668 /* ProductSheet.swift */,
 				203B007F07FFB845384BD2D8 /* Ripple.swift */,
+				601FE2D91F1E4C287B28B915 /* RuleEditor.swift */,
 				0D9CCE3AA2DB88B63F3F5AE3 /* RuleSheet.swift */,
 				B62812298D584BB58C041C20 /* ShoppingListCard.swift */,
 				827AE823252883C5C1DA44E3 /* StateCard.swift */,
@@ -173,6 +182,7 @@
 		390CE886663227C299DA86E1 /* BoundedMandateTests */ = {
 			isa = PBXGroup;
 			children = (
+				5E4EF06C1F8824F03E4A02D1 /* AmountTests.swift */,
 				1EF8722A4C7F67E1C3AF706A /* PayloadTests.swift */,
 				A782392F4478D7E6A5C7922E /* Payloads */,
 			);
@@ -189,6 +199,7 @@
 				7ECAB4BEC7219BD2FE7B6DF8 /* Home.swift */,
 				981B1BE2871D2E690A76C5E0 /* Ledger.swift */,
 				AB4FFE7DC44692541EF8FAFE /* Product.swift */,
+				03F6B960853107890BB24D10 /* Rule.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -224,6 +235,7 @@
 				547E104CAEC12ADCF7194C89 /* offers_category_blocked.json */,
 				43F2DF620B35C624AAC1C692 /* offers.json */,
 				604D1D9736A19B511A0F3FF3 /* product.json */,
+				341A307067548DD3C861C137 /* rule.json */,
 				FBE069DC68F919F6052214CE /* turn_deny.json */,
 				C9736444AF6DBCB412CF4E12 /* turn_escalate.json */,
 				4B4772911BE45B54FA37B34F /* turn_prices.json */,
@@ -356,6 +368,7 @@
 				6FA94D52184FABEF368C93F3 /* offers.json in Resources */,
 				61E773A70F15F85EB79EB42F /* offers_category_blocked.json in Resources */,
 				E40BEC420A6AE7F0AC9A3D64 /* product.json in Resources */,
+				06119404FFF72BD34F525D74 /* rule.json in Resources */,
 				B89B81EFC730E92C5C6317EA /* turn_deny.json in Resources */,
 				38847C894E60C2D51CDA457C /* turn_escalate.json in Resources */,
 				C9175BE14C157761031F15B0 /* turn_prices.json in Resources */,
@@ -393,6 +406,8 @@
 				EFAA88FB0D1D1A3B856DC282 /* Product.swift in Sources */,
 				1FB1A51BAA4441A9689D973C /* ProductSheet.swift in Sources */,
 				48F5D8818E08FBE4ACD83A38 /* Ripple.swift in Sources */,
+				A79301E7B1125A4DE4AD7FCC /* Rule.swift in Sources */,
+				0B80CABAE65A8AEA9DFAA3B0 /* RuleEditor.swift in Sources */,
 				5CD221941ADE09A09DE469FF /* RuleSheet.swift in Sources */,
 				D1E861CE4594428BD4513065 /* ShoppingListCard.swift in Sources */,
 				2743727C23114CD43BA2C867 /* StateCard.swift in Sources */,
@@ -408,6 +423,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B3B11C6329DE668F17B3812A /* AmountTests.swift in Sources */,
 				6FAC6DEBA73B5518D401A4E7 /* PayloadTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

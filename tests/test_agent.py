@@ -306,3 +306,41 @@ def test_a_malformed_item_list_is_an_error_not_a_crash(policies, ledger):
     out = agent._dispatch(AgentRun("x"), "create_cart", {"item_names": "Brown bread"})
 
     assert "error" in out
+
+
+def test_no_tool_can_set_the_rule_it_is_judged_against():
+    """The mirror of `test_no_tool_writes_the_shopping_list`, and the same
+    reasoning. An agent that could edit its own list could redefine "my usual
+    groceries" and then order the new definition within policy; an agent that
+    could edit its own *mandate* would not even need the disguise.
+
+    `PUT /api/mandate` is the route where authority is created, and it is
+    reachable only by the account holder — there is no tool for it, and there is
+    no tool that takes a cap, a merchant list or a cadence as an argument at all.
+    """
+    names = {t["function"]["name"] for t in TOOLS}
+    assert names.isdisjoint({"set_rule", "set_mandate", "edit_policy", "update_mandate"})
+
+    # Not by name alone — nothing may take a *mandate* bound as a parameter
+    # under any name.
+    #
+    # `every_days` is deliberately not in this set, and the distinction is the
+    # interesting part. `propose_list` carries one, but that is a list's
+    # schedule, and a schedule cannot widen authority: the engine never reads
+    # one, so a list set to run hourly under a mandate permitting one order
+    # every four days is simply refused three times a day. The mandate's own
+    # window is `window_days`, which no tool touches.
+    bounds = {
+        "per_txn_max_paise",
+        "max_amount_paise",
+        "cap",
+        "cap_paise",
+        "merchants",
+        "window_days",
+        "cadence_days",
+    }
+    for tool in TOOLS:
+        params = set(tool["function"]["parameters"].get("properties", {}))
+        assert params.isdisjoint(bounds), (
+            f"{tool['function']['name']} takes a bound: {params & bounds}"
+        )

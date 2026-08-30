@@ -242,6 +242,16 @@ _TABLE: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+#: The categories a user may put on a rule, in the order the controls show them.
+#: Derived from the table rather than typed out again, so a category the
+#: resolver can produce is always one the rule can name — a control offering a
+#: category `categorise` never returns would be an option that does nothing.
+#:
+#: `FEES` is absent on purpose: the engine adds it to every policy and it is not
+#: the user's to choose.
+KNOWN: tuple[str, ...] = tuple(name for name, _ in _TABLE)
+
+
 def categorise(name: str) -> str:
     """A category for this product, or `""` when the table cannot place it.
 
