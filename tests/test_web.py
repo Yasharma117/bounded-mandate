@@ -70,12 +70,41 @@ def test_an_unstocked_item_is_a_400(client):
 
 
 def test_a_verified_settlement_is_written_to_the_ledger(client):
-    propose(client, USUAL, 185_000)
-    client.post("/api/settlement/verify", json=CALLBACK)
+    """A settlement must match a grant we opened, so this mints one first. It
+    used to pass without: the route wrote SETTLED off the signature alone."""
+    over = propose(client, [*USUAL, "Smartwatch"], 1_035_000)
+    client.post("/api/mandate/one-time", json={"cart_id": over["cart_id"]})
 
+    settled = client.post(
+        "/api/settlement/verify",
+        json={
+            "razorpay_order_id": "order_charge_1",
+            "razorpay_payment_id": "pay_1",
+            "razorpay_signature": "sig",
+        },
+    )
+
+    assert settled.status_code == 200
     entries = client.get("/api/ledger").json()
     assert entries["chain_intact"]
     assert entries["entries"][-1]["razorpay_payment_id"] == "pay_1"
+
+
+def test_a_settlement_no_grant_asked_for_is_refused(client):
+    """The signature proves Razorpay sent it, not that we asked for it. A valid
+    triple replayed from another flow on the same account verifies just as well
+    — and used to write a SETTLED entry that matched no grant, after which the
+    home card read: Paid, your order, it is on its way.
+    """
+    propose(client, USUAL, 185_000)
+    before = len(client.get("/api/ledger").json()["entries"])
+
+    refused = client.post("/api/settlement/verify", json=CALLBACK)
+
+    assert refused.status_code == 400
+    assert "no open grant" in refused.json()["detail"]
+    assert len(client.get("/api/ledger").json()["entries"]) == before
+    assert client.get("/api/home").json()["state"] != "paid"
 
 
 def test_a_forged_settlement_writes_nothing(client):

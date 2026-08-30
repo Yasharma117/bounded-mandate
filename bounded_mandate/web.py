@@ -808,17 +808,28 @@ def verify_settlement(body: Callback) -> dict:
     except SignatureMismatch as exc:
         raise HTTPException(400, "signature verification failed") from exc
 
-    # If this settled a one-time grant, the grant is now spent. Razorpay would
-    # refuse a second payment on a paid order anyway; revoking here means our
-    # own store says so too, rather than relying on the rail to remember.
+    # The signature proves Razorpay sent this. It does not prove it is *ours* —
+    # a valid triple replayed from any other flow on this account verifies just
+    # as well. Without this guard a replayed registration callback wrote a
+    # SETTLED entry that matched no grant, and the home card then read
+    # "Paid — your order. It is on its way." about an order nobody placed.
+    #
+    # So authenticity and authorisation are checked separately, which is the
+    # same split the engine makes everywhere else: the signature says who spoke,
+    # the grant says whether it was allowed to.
     grant = next(
         (g for g in GRANTS.values() if g.order_id == body.razorpay_order_id and not g.payment_id),
         None,
     )
-    if grant is not None:
-        grant.payment_id = body.razorpay_payment_id
-        POLICIES[grant.grant_id] = replace(grant.policy, status=MandateStatus.REVOKED)
-        save_grants()
+    if grant is None:
+        raise HTTPException(400, "no open grant matches this order")
+
+    # The grant is now spent. Razorpay would refuse a second payment on a paid
+    # order anyway; revoking here means our own store says so too, rather than
+    # relying on the rail to remember.
+    grant.payment_id = body.razorpay_payment_id
+    POLICIES[grant.grant_id] = replace(grant.policy, status=MandateStatus.REVOKED)
+    save_grants()
 
     LEDGER.append(
         {
@@ -826,7 +837,7 @@ def verify_settlement(body: Callback) -> dict:
             "razorpay_order_id": body.razorpay_order_id,
             "razorpay_payment_id": body.razorpay_payment_id,
             "signature_verified": True,
-            **({"grant_id": grant.grant_id} if grant else {}),
+            "grant_id": grant.grant_id,
         }
     )
     return {"verified": True, "payment_id": body.razorpay_payment_id}
