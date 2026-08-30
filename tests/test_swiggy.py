@@ -172,10 +172,18 @@ class TestCategory:
         assert categorise("Fresh Onion 1kg") == "groceries"
         assert categorise("Britannia Brown Bread") == "groceries"
 
+    def test_a_device_is_placed_as_one(self):
+        """Headphones and earbuds used to come back blank, which made the engine
+        ask "what is this?" about a thing it can name. Placing them is stricter,
+        not looser: `electronics` is on no grocery mandate, so the answer moved
+        from a question to a refusal."""
+        assert categorise("Sony WH-1000XM5 Headphones") == "electronics"
+        assert categorise("Bluetooth Earbuds") == "electronics"
+
     def test_what_it_cannot_place_stays_blank(self):
         """Blank is the answer that makes the engine ask instead of assume."""
-        assert categorise("Sony WH-1000XM5 Headphones") == ""
-        assert categorise("Bluetooth Earbuds") == ""
+        assert categorise("Zorblex 9000") == ""
+        assert categorise("Assorted novelty item") == ""
         assert categorise("") == ""
 
     def test_an_unplaceable_item_makes_the_engine_ask(self, policy, policies, ledger):
@@ -187,7 +195,7 @@ class TestCategory:
         cart = Cart(
             cart_id="swiggy_x",
             merchant="instamart",
-            items=(CartItem("Sony Headphones", 40_000, categorise("Sony Headphones")),),
+            items=(CartItem("Zorblex 9000", 40_000, categorise("Zorblex 9000")),),
             delivery_address=HOME,
         )
         decision = decide(

@@ -66,7 +66,11 @@ class TestCategoryCannotBeSmuggled:
         now the only thing that may mint that category."""
         from bounded_mandate.swiggy import _category_for
 
-        assert _category_for("Smartwatch", {"Smartwatch": FEES}) == ""
+        # The category the table itself gives it, never the one the caller asked
+        # for — which is the property. That it is now placeable at all is the
+        # devices table doing its job.
+        assert _category_for("Smartwatch", {"Smartwatch": FEES}) == "electronics"
+        assert _category_for("Zorblex 9000", {"Zorblex 9000": FEES}) == ""
 
     def test_the_list_route_refuses_to_store_it(self, client):
         """Defence in depth: blocked at the boundary as well as at the reader."""
@@ -131,25 +135,52 @@ class TestCategoryCannotBeSmuggled:
         assert report.substituted == (("Milk", "Milk Frother Machine Deluxe Steel"),)
         assert report.diverged, "a rename must reach the same surface as an out-of-stock line"
 
-    def test_no_rule_pretends_to_judge_a_substitution(self):
-        """**Known limitation, deliberately not papered over.**
+    def test_an_appliance_wearing_a_grocery_word_is_not_a_grocery(self):
+        """This used to pass the other way, and was written up as a limitation:
+        "Milk" resolving to "Milk Frother Machine Deluxe Steel" was called
+        groceries, because a substring table asked only whether `milk` appeared.
 
-        "Milk" resolving to "Amul Toned Milk 1 L" is the thing that was asked
-        for. "Milk" resolving to "Milk Frother Machine Deluxe Steel" is a
-        different object wearing the word. They have the same word count, the
-        same overlap, and the substring lookup calls both groceries — no cheap
-        signal separates them.
-
-        A heuristic that got this wrong would manufacture confidence in exactly
-        the case it failed on, so there is none. Every rename is reported, the
-        card shows what resolved, and the cap bounds the cost. If an agent can
-        steer resolution, that is the residual risk in this design.
+        It was not a limitation, it was an ordering mistake. `frother` is a
+        cheap signal and it does separate them — it just has to be *looked at
+        first*. Found live: `Apple iPhone 17 Pro` came back as groceries on a
+        ₹1,29,900 line and was stopped only by the cap, which is the wrong guard
+        doing the work. A ₹900 Apple Watch band clears the cap.
         """
         from bounded_mandate.categories import categorise
 
-        assert (
-            categorise("Amul Toned Milk 1 L") == categorise("Milk Frother Machine") == "groceries"
-        )
+        assert categorise("Amul Toned Milk 1 L") == "groceries"
+        for wearing in (
+            "Milk Frother Machine Deluxe Steel",
+            "Apple iPhone 17 Pro | 256 GB Storage",
+            "Apple Watch Series 10",
+            "Rice cooker 1.8L",
+            "Egg boiler electric",
+            "Philips Air Fryer NA120/00",
+        ):
+            assert categorise(wearing) == "electronics", wearing
+
+    def test_no_rule_pretends_to_judge_a_substitution(self):
+        """**Known limitation, deliberately not papered over — narrowed, not closed.**
+
+        The appliance case above is handled. The one that remains is a rename
+        *within* a category: "Milk" resolving to a ₹900 imported cheese is still
+        groceries, and no cheap signal says the user did not mean it.
+
+        A heuristic that guessed here would manufacture confidence in exactly the
+        case it failed on, so there is none. Every rename is reported, the card
+        shows what resolved, and the cap bounds the cost. If an agent can steer
+        resolution inside a category, that is the residual risk in this design.
+        """
+        from bounded_mandate.categories import categorise
+
+        assert categorise("Amul Toned Milk 1 L") == categorise("Milk Powder 1kg") == "groceries"
+
+    def test_a_name_the_table_cannot_place_still_fails_closed(self):
+        """The direction that matters. A new table cannot have made anything
+        confident that was previously blank."""
+        from bounded_mandate.categories import categorise
+
+        assert categorise("Zorblex 9000") == ""
 
 
 # --- attacks on the money path ----------------------------------------------

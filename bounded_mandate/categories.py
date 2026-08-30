@@ -182,7 +182,60 @@ _PERSONAL_CARE: tuple[str, ...] = (
     "handwash",
 )
 
+# Things that are named after food and are not food. `Apple iPhone` matched
+# `apple`, `Rice cooker` matched `rice`, `Egg boiler` matched `egg` — and a
+# ₹1,29,900 phone came back as `groceries`, cleared the category check, and was
+# stopped only by the cap. The cap is the wrong guard for that: a ₹900 `Apple
+# Watch band` clears both.
+#
+# So the specific term is checked before the generic one. This table is first in
+# `_TABLE` and first match wins, which is the whole mechanism — `iphone` is
+# reached before `apple` ever is.
+#
+# Every needle here is a substring test like the rest, so each one is chosen to
+# have no innocent host: `iron` was left out because it hides inside
+# `environment`, `fan` inside `infant`, and `oven` inside `oven-fresh bread`.
+_DEVICES: tuple[str, ...] = (
+    "iphone",
+    "ipad",
+    "macbook",
+    "airpods",
+    "earbud",
+    "headphone",
+    "earphone",
+    "speaker",
+    "smartwatch",
+    "watch",
+    "laptop",
+    "keyboard",
+    "power bank",
+    "charger",
+    "adapter",
+    "battery",
+    "bulb",
+    "camera",
+    "trimmer",
+    "cooker",
+    "fryer",
+    "grinder",
+    "mixer",
+    "kettle",
+    "toaster",
+    "blender",
+    "frother",
+    "juicer",
+    "grater",
+    "peeler",
+    "chopper",
+    "microwave",
+    "refrigerator",
+    "vacuum",
+    "boiler",
+)
+
 _TABLE: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # First, and deliberately: a specific term beats a generic one.
+    ("electronics", _DEVICES),
     ("groceries", _GROCERIES),
     ("household", _HOUSEHOLD),
     ("personal care", _PERSONAL_CARE),
