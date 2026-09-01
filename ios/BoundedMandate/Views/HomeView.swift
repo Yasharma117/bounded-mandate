@@ -176,27 +176,48 @@ struct HomeView: View {
 
     // MARK: - the rule, which finally has a screen
 
+    /// The rule, and the way into it.
+    ///
+    /// The way in used to be the `view_rule` action, which `_home_state` offers
+    /// only when the engine is `at_rest` — so in `preflight`, `needs_you` and
+    /// `paid`, the one screen where the account holder sets their own bounds
+    /// could not be reached at all. A UI test driving the app found that in the
+    /// first run; nothing that only builds the app could have.
+    ///
+    /// Tapping the rule to open the rule is also the right shape independent of
+    /// the bug: this block *is* the rule, displayed, and the thing you tap to
+    /// see more of something should be the something.
     private func rule(_ rule: Rule) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: "checkmark.shield.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.primary)
-                Eyebrow(text: "Your rule is running", color: theme.primary)
+        Button { showingRule = true } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 7) {
+                    Image(systemName: "checkmark.shield.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.primary)
+                    Eyebrow(text: "Your rule is running", color: theme.primary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.primary.opacity(0.6))
+                }
+                Text(rupees(rule.perTxnMaxPaise))
+                    .font(.system(size: 32, weight: .medium))
+                    .monospacedDigit()
+                    .kerning(-1.1)
+                    .foregroundStyle(theme.textNormal)
+                // One line, not four labelled rows. A rule is short enough to be
+                // a sentence, and four rows would be four times the height for it.
+                Text(rule.summary)
+                    .font(.system(size: 14))
+                    .foregroundStyle(theme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
             }
-            Text(rupees(rule.perTxnMaxPaise))
-                .font(.system(size: 32, weight: .medium))
-                .monospacedDigit()
-                .kerning(-1.1)
-                .foregroundStyle(theme.textNormal)
-                .textSelection(.enabled)
-            // One line, not four labelled rows. A rule is short enough to be a
-            // sentence, and four rows would be four times the height for it.
-            Text(rule.summary)
-                .font(.system(size: 14))
-                .foregroundStyle(theme.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
         }
+        .buttonStyle(.pressable)
+        .accessibilityLabel("Your rule, \(rupees(rule.perTxnMaxPaise)) per order")
+        .accessibilityHint("Opens your rule, where you can change its bounds")
         .padding(.horizontal, 2)
     }
 

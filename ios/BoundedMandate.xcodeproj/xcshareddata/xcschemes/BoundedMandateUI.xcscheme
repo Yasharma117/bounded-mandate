@@ -29,20 +29,6 @@
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "B12A9C150FF8E40ACC44F70E"
-               BuildableName = "BoundedMandateTests.xctest"
-               BlueprintName = "BoundedMandateTests"
-               ReferencedContainer = "container:BoundedMandate.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
                BlueprintIdentifier = "121F2B88B8BFCC8FDB26F088"
                BuildableName = "BoundedMandateUITests.xctest"
                BlueprintName = "BoundedMandateUITests"
@@ -72,9 +58,9 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "B12A9C150FF8E40ACC44F70E"
-               BuildableName = "BoundedMandateTests.xctest"
-               BlueprintName = "BoundedMandateTests"
+               BlueprintIdentifier = "121F2B88B8BFCC8FDB26F088"
+               BuildableName = "BoundedMandateUITests.xctest"
+               BlueprintName = "BoundedMandateUITests"
                ReferencedContainer = "container:BoundedMandate.xcodeproj">
             </BuildableReference>
          </TestableReference>

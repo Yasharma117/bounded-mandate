@@ -49,11 +49,38 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.yasharma.boundedmandate.tests
         GENERATE_INFOPLIST_FILE: "YES"
 
+  # Taps, not assertions about taps. The unit target decodes payloads; this one
+  # drives the app the way a person does, because three surfaces in this build
+  # (the ledger tally, the rule editor, the product sheet) are only reachable
+  # through a gesture and were shipped unlooked-at as a result.
+  BoundedMandateUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: BoundedMandateUITests
+    dependencies:
+      - target: BoundedMandate
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.yasharma.boundedmandate.uitests
+        GENERATE_INFOPLIST_FILE: "YES"
+
 schemes:
   BoundedMandate:
     build:
       targets:
         BoundedMandate: all
         BoundedMandateTests: [test]
+        BoundedMandateUITests: [test]
     test:
       targets: [BoundedMandateTests]
+
+  # Kept off the default scheme's test action on purpose: these need the engine
+  # answering on :8117, so they must not break `xcodebuild test` in CI.
+  BoundedMandateUI:
+    build:
+      targets:
+        BoundedMandate: all
+        BoundedMandateUITests: [test]
+    test:
+      targets: [BoundedMandateUITests]
