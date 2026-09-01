@@ -649,10 +649,23 @@ class TestTheAgentCannotGoShopping:
     """
 
     def test_naming_a_shop_is_optional_so_it_is_never_forced_to_guess(self):
+        """Two fields, opposite treatment, same principle — a schema gets a more
+        honest answer than a prompt does, so ask only what can be answered.
+
+        `merchant` is optional because the agent cannot see which shops are
+        allowed: required, it guessed, and the user got a refusal naming a shop
+        they never mentioned. `asked_for` is required *because* it carries a
+        `not_said` value — the model can always answer it truthfully, and being
+        asked at the moment of acting is the point.
+        """
         from bounded_mandate.agent import TOOLS
 
         schema = next(t for t in TOOLS if t["function"]["name"] == "create_cart")
-        assert schema["function"]["parameters"]["required"] == ["item_names"]
+        required = schema["function"]["parameters"]["required"]
+
+        assert "merchant" not in required, "a required shop makes it guess"
+        assert "asked_for" in required
+        assert "not_said" in schema["function"]["parameters"]["properties"]["asked_for"]["enum"]
 
     def test_omitting_the_shop_uses_the_account_s_usual_one(self, ledger):
         from bounded_mandate.agent import BuyerAgent
@@ -666,7 +679,9 @@ class TestTheAgentCannotGoShopping:
             client=object(),
         )
         assert (
-            agent._dispatch(None, "create_cart", {"item_names": ["Brown bread"]})["merchant"]
+            agent._dispatch(
+                None, "create_cart", {"item_names": ["Brown bread"], "asked_for": "once"}
+            )["merchant"]
             == "instamart"
         )
 
@@ -683,16 +698,22 @@ class TestTheAgentCannotGoShopping:
             delivery_address=HOME,
             client=object(),
         )
-        first = agent._dispatch(None, "create_cart", {"item_names": ["Brown bread"]})
+        first = agent._dispatch(
+            None, "create_cart", {"item_names": ["Brown bread"], "asked_for": "once"}
+        )
         assert first["merchant"] == "instamart"
 
         moved = agent._dispatch(
-            None, "create_cart", {"item_names": ["Brown bread"], "merchant": "blinkit"}
+            None,
+            "create_cart",
+            {"item_names": ["Brown bread"], "merchant": "blinkit", "asked_for": "once"},
         )
         assert "error" in moved
         assert "instamart" in moved["error"]
 
         # Same shop again is fine: that is a corrected basket, not a new shop.
         assert "cart_id" in agent._dispatch(
-            None, "create_cart", {"item_names": ["Curd 400g"], "merchant": "instamart"}
+            None,
+            "create_cart",
+            {"item_names": ["Curd 400g"], "merchant": "instamart", "asked_for": "once"},
         )

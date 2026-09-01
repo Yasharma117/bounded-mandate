@@ -14,10 +14,12 @@ SHOP = "instamart"
 CART = "instamart_cart_1"
 
 
-def call(name, **args):
+def call(tool, **args):
+    """`tool` rather than `name` because `propose_list` takes a `name` argument
+    of its own, and the two collided."""
     return SimpleNamespace(
-        id=f"call_{name}",
-        function=SimpleNamespace(name=name, arguments=json.dumps(args)),
+        id=f"call_{tool}",
+        function=SimpleNamespace(name=tool, arguments=json.dumps(args)),
     )
 
 
@@ -119,7 +121,14 @@ def test_a_refusal_tells_the_agent_why_but_not_what_the_limits_are(policies, led
     agent = build(
         scripted(
             (
-                [call("create_cart", merchant=SHOP, item_names=[*USUAL_GROCERIES, "Smartwatch"])],
+                [
+                    call(
+                        "create_cart",
+                        asked_for="once",
+                        merchant=SHOP,
+                        item_names=[*USUAL_GROCERIES, "Smartwatch"],
+                    )
+                ],
                 None,
             ),
             ([call("request_charge", cart_id=CART, claimed_total_paise=185_000)], None),
@@ -142,7 +151,17 @@ def test_an_honest_run_is_allowed(policies, ledger):
     agent = build(
         scripted(
             ([call("search_catalog", query="groceries")], None),
-            ([call("create_cart", merchant=SHOP, item_names=list(USUAL_GROCERIES))], None),
+            (
+                [
+                    call(
+                        "create_cart",
+                        asked_for="once",
+                        merchant=SHOP,
+                        item_names=list(USUAL_GROCERIES),
+                    )
+                ],
+                None,
+            ),
             ([call("request_charge", cart_id=CART, claimed_total_paise=185_000)], None),
             (None, "Ordered."),
         ),
@@ -163,7 +182,17 @@ def test_a_lying_agent_is_refused_however_low_it_goes(policies, ledger):
     """Observed live: a compromised agent walks the claimed total down to ₹1.
     Every attempt must fail on the same fetched cart."""
     turns = [
-        ([call("create_cart", merchant=SHOP, item_names=[*USUAL_GROCERIES, "Smartwatch"])], None)
+        (
+            [
+                call(
+                    "create_cart",
+                    asked_for="once",
+                    merchant=SHOP,
+                    item_names=[*USUAL_GROCERIES, "Smartwatch"],
+                )
+            ],
+            None,
+        )
     ]
     for claim in (1_535_000, 500_000, 100_000, 1_000, 100):
         turns.append(([call("request_charge", cart_id=CART, claimed_total_paise=claim)], None))
@@ -181,7 +210,7 @@ def test_a_lying_agent_is_refused_however_low_it_goes(policies, ledger):
 def test_an_unstocked_item_does_not_crash_the_run(policies, ledger):
     agent = build(
         scripted(
-            ([call("create_cart", merchant=SHOP, item_names=["Ferrari"])], None),
+            ([call("create_cart", asked_for="once", merchant=SHOP, item_names=["Ferrari"])], None),
             (None, "Not stocked."),
         ),
         policies,
@@ -344,3 +373,70 @@ def test_no_tool_can_set_the_rule_it_is_judged_against():
         assert params.isdisjoint(bounds), (
             f"{tool['function']['name']} takes a bound: {params & bounds}"
         )
+
+
+# --- once, or every time -----------------------------------------------------
+
+
+def test_the_agent_is_told_to_ask_rather_than_guess_the_cadence():
+    """A one-off and a standing order are different actions, and neither is a
+    milder version of the other. Guessing repeating leaves somebody with an
+    order arriving every week they never asked for.
+
+    This pins the instruction, not the behaviour — a prompt line is only worth
+    what the model does with it, and `test_live` is where that is measured.
+    """
+    from bounded_mandate.agent import SYSTEM, TOOLS
+
+    assert "once, or every time" in SYSTEM
+    assert "CALL NO TOOLS while you wait" in SYSTEM
+
+    # The tool the model would reach for by mistake says the same thing, since
+    # a description is read at the moment of choosing and the system prompt was
+    # read a long way back.
+    drafting = next(t["function"] for t in TOOLS if t["function"]["name"] == "propose_list")
+    assert "ask them in a sentence instead of calling this" in drafting["description"]
+
+
+def test_asking_which_one_spends_nothing(policies, ledger):
+    """The whole point of asking is that nothing has happened yet."""
+    agent = build(
+        scripted(([], "Just this once, or should I set that up to repeat?")), policies, ledger
+    )
+
+    out = agent.run("order milk and bread")
+
+    assert out.steps == []
+    assert out.decision is None
+    assert out.draft is None
+    assert "repeat" in out.said
+
+
+def test_a_repeating_order_is_drafted_and_not_charged(policies, ledger):
+    """Approving the list is what starts it. A draft that also charged would
+    have taken the first order without being asked for it."""
+    agent = build(
+        scripted(
+            (
+                [
+                    call(
+                        "propose_list",
+                        name="Weekly milk",
+                        item_names=["Toned milk 1L x2"],
+                        every_days=7,
+                    )
+                ],
+                None,
+            ),
+            ([], "Drafted — approve it and it will go out every week."),
+        ),
+        policies,
+        ledger,
+    )
+
+    out = agent.run("get me milk every week")
+
+    assert out.draft is not None
+    assert out.draft.every_days == 7
+    assert out.decision is None, "a draft must not charge"
+    assert [s.tool for s in out.steps] == ["propose_list"]

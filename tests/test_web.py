@@ -676,7 +676,7 @@ def test_the_agent_holds_no_tool_that_moves_the_address(client):
     from bounded_mandate.agent import BuyerAgent
 
     args = inspect.signature(BuyerAgent._create_cart).parameters
-    assert set(args) == {"self", "item_names", "merchant"}
+    assert set(args) == {"self", "item_names", "merchant", "asked_for"}
 
 
 # --- product photographs ------------------------------------------------------

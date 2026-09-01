@@ -165,3 +165,38 @@ def test_an_authorised_order_is_not_reported_as_a_completed_payment():
 
     assert "successfully" not in said
     assert "went through" not in said
+
+
+# --- once, or every time -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["order milk and bread", "get me some yogurt", "buy me a couple of bananas"],
+)
+def test_an_unstated_cadence_is_asked_about_not_guessed(said):
+    """The one that matters. An ambiguous ask must spend nothing and draft
+    nothing — it must come back with a question."""
+    run = _agent().run(said)
+
+    assert run.decision is None, f"{said!r} reached the engine"
+    assert run.draft is None, f"{said!r} drafted a standing list unasked"
+    assert [s.tool for s in run.steps] == [], f"{said!r} used tools: {run.steps}"
+    assert "?" in run.said, f"{said!r} did not ask anything: {run.said!r}"
+
+
+def test_saying_repeating_drafts_a_list_and_charges_nothing():
+    """Approving the list is what starts it. A draft that also charged would
+    have taken the first order without being asked for it."""
+    run = _agent().run("Get me toned milk and brown bread every week.")
+
+    assert run.draft is not None, f"nothing drafted: {run.said!r}"
+    assert run.decision is None, "a repeating order must not charge on the spot"
+
+
+def test_saying_once_still_buys_once():
+    """The gate must not have closed on the ordinary case."""
+    run = _agent().run("Order my usual groceries from Instamart, just this once.")
+
+    assert run.decision is not None, f"nothing reached the engine: {run.said!r}"
+    assert run.draft is None, "a one-off must not become a standing list"

@@ -59,12 +59,46 @@ Do not build a cart. Someone saying "hello" is not someone asking you to spend
 their money, and ordering unbidden is not made acceptable by the order landing
 inside their limits — being in policy is not the same as being wanted.
 
-If they are describing things they want to buy regularly rather than asking you
-to buy now, call `propose_list` and write it out for them. You cannot create or
-change a list — only they can, by approving what you wrote — so draft it and say
-you have, rather than telling them to go and do it themselves.
+SECOND, if you ARE being asked to buy: is this once, or every time?
 
-When you ARE asked to buy, work in this order:
+Three things settle it. Nothing else does:
+
+    once       they said so — "just this once", "today", "right now", "one time"
+    repeating  they said so — "every week", "each month", "regularly",
+               "keep me stocked in X"
+    once       they named a list they already have, like "my usual groceries".
+               Running an existing list is a one-off; its own schedule is what
+               makes it repeat, and that is already set.
+
+Anything else is unsettled, however ordinary it sounds.
+
+In particular, these do NOT settle it, and this is the mistake to watch for:
+
+    "order milk and bread"          "get me some yogurt"
+    "buy me a couple of bananas"    "add rice"
+
+Every one of those is a way of saying *acquire this*. None of them is a way of
+saying *once*. They read like one-offs because most requests are, and that is
+precisely the assumption to resist — you are being asked to spend somebody's
+money on terms they have not given you. Answer `not_said` for all four.
+
+When it is unsettled, ASK. One short question, and CALL NO TOOLS while you wait
+— "Just this once, or should I set that up to repeat?" is the whole thing. Do
+not read the list, do not build a cart, do not draft anything, do not search.
+Then do what they answer.
+
+Never guess between the two. They are different actions and neither is a milder
+version of the other: a one-off buys the thing and stops, and a repeating one
+becomes a standing list that goes out on a schedule from then on. Guess
+repeating and somebody gets an order every week they never asked for; guess once
+and they are without the thing on Tuesday. Asking costs one sentence.
+
+Repeating: call `propose_list` with `every_days` set. You cannot create or
+change a list — only they can, by approving what you wrote — so draft it and say
+you have, rather than telling them to go and do it themselves. Do not also
+charge for it; approving the list is what starts it.
+
+Once, work in this order:
 1. `read_shopping_list` to see what the account holder actually wants. This is
    their list, not yours. You cannot change it.
 2. `create_cart` with the exact item names, naming the merchant. Names from the
@@ -178,8 +212,27 @@ TOOLS: list[dict[str, Any]] = [
                             "and the account's usual shop is used."
                         ),
                     },
+                    # Required, and "not_said" is a first-class answer, which is
+                    # the whole design. The mirror of `merchant` above: that
+                    # field was required with no way to say "they didn't name
+                    # one", so the model guessed. This one is required with a
+                    # way to say it, so the model can be honest instead — and a
+                    # required field is considered at the moment of the call,
+                    # which a sentence in a system prompt read long ago is not.
+                    "asked_for": {
+                        "type": "string",
+                        "enum": ["once", "repeating", "not_said"],
+                        "description": (
+                            "Did they say whether this is a one-off or something "
+                            "they want regularly? 'once' or 'repeating' only if "
+                            "they actually said so, or named a list they already "
+                            "have. 'not_said' otherwise — that is the honest "
+                            "answer for an ordinary 'order milk and bread', and "
+                            "it is not a failure."
+                        ),
+                    },
                 },
-                "required": ["item_names"],
+                "required": ["item_names", "asked_for"],
             },
         },
     },
@@ -190,10 +243,12 @@ TOOLS: list[dict[str, Any]] = [
             "description": (
                 "Write out a shopping list for the account holder to look at and "
                 "approve. This does NOT create or change anything — only they can "
-                "do that, and they do it by confirming what you wrote. Use it when "
-                "they describe things they want to buy, especially on a repeating "
-                "schedule. Put quantities in the item name, e.g. 'Epigamia "
-                "blueberry yogurt x6'."
+                "do that, and they do it by confirming what you wrote. This is the "
+                "**repeating** path: use it when they want something regularly, and "
+                "set `every_days` to how often. If you do not yet know whether they "
+                "mean once or every time, ask them in a sentence instead of calling "
+                "this. Put quantities in the item name, e.g. 'Epigamia blueberry "
+                "yogurt x6'."
             ),
             "parameters": {
                 "type": "object",
@@ -338,7 +393,41 @@ class BuyerAgent:
             ]
         }
 
-    def _create_cart(self, item_names: list[str], merchant: str) -> dict[str, Any]:
+    def _create_cart(
+        self, item_names: list[str], merchant: str, asked_for: str = "not_said"
+    ) -> dict[str, Any]:
+        # The cadence question, answered at the moment of acting.
+        #
+        # Asked in the system prompt alone it was obeyed on one phrasing in
+        # three: "order milk and bread" got a question, "get me some yogurt" and
+        # "buy me a couple of bananas" were bought on the spot. The instruction
+        # was fine — it was just read a long way before the moment it applied to,
+        # and a required argument is read at that moment.
+        #
+        # `not_said` being a legible answer is the whole design, and it is the
+        # same lesson as `merchant` directly above, inverted. That field was
+        # required with no way to say "they did not name one", so the model
+        # guessed. This one is required *with* a way to say it, so it can be
+        # honest instead.
+        #
+        # Keying off the cart's contents was tried first and was the wrong
+        # signal: it let "buy me a couple of bananas" through because bananas
+        # happen to be on the standing list, which confuses running a list with
+        # asking for a thing that is on one. What settles it is what the person
+        # said, and the only reader of that is the model.
+        #
+        # This cannot stop a model that answers "once" untruthfully, and does not
+        # try to. No authority turns on it either way: a one-off is ruled on by
+        # the engine, and only the account holder can turn a draft into a
+        # standing list.
+        if asked_for == "not_said":
+            return {
+                "error": "not yet — they have not said whether this is a one-off "
+                "or something they want regularly",
+                "do_this": "Ask them in one short sentence and call nothing else. "
+                "'Just this once, or should I set that up to repeat?'",
+            }
+
         # One shop per run, enforced here rather than asked for in the prompt.
         #
         # Left to itself the agent would build the right cart, abandon it, and
@@ -423,7 +512,9 @@ class BuyerAgent:
             if not isinstance(names, list):
                 return {"error": "item_names must be a list of names"}
             return self._create_cart(
-                [str(n) for n in names], str(args.get("merchant") or MERCHANT_NAME)
+                [str(n) for n in names],
+                str(args.get("merchant") or MERCHANT_NAME),
+                str(args.get("asked_for") or "not_said"),
             )
         if name == "request_charge":
             claimed = _paise(args.get("claimed_total_paise"))
