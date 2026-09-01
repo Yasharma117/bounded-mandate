@@ -717,3 +717,147 @@ class TestTheAgentCannotGoShopping:
             "create_cart",
             {"item_names": ["Curd 400g"], "merchant": "instamart", "asked_for": "once"},
         )
+
+
+# --- attacks on the rule editor ----------------------------------------------
+
+
+class TestTheRuleEditorCannotBeAbused:
+    """The newest authority surface, and the only route that writes the policy
+    the engine enforces. Everything else in the app spends authority; this
+    creates it."""
+
+    def test_an_absurd_cap_is_refused(self, client):
+        """The ceiling is there to catch a stray zero, not to have an opinion
+        about how much somebody may spend."""
+        rule = {
+            "per_txn_max_paise": 200_000,
+            "merchants": ["instamart"],
+            "categories": ["groceries"],
+            "every_days": 4,
+        }
+        codes = {
+            cap: client.put("/api/mandate", json={**rule, "per_txn_max_paise": cap}).status_code
+            for cap in (0, -1, -200_000, 10**12, 10**18)
+        }
+
+        assert all(code == 422 for code in codes.values()), codes
+
+    def test_a_rule_cannot_be_emptied_of_shops_or_categories(self, client):
+        """A rule with no shops permits nothing, which sounds safe and is not:
+        it is a rule the user cannot tell apart from a broken one."""
+        rule = {
+            "per_txn_max_paise": 200_000,
+            "merchants": ["instamart"],
+            "categories": ["groceries"],
+            "every_days": 4,
+        }
+        before = set(web.POLICIES["mdt_demo"].merchants)
+
+        blanked = {
+            "empty": client.put("/api/mandate", json={**rule, "merchants": []}).status_code,
+            "spaces": client.put(
+                "/api/mandate", json={**rule, "merchants": ["  ", ""]}
+            ).status_code,
+            "categories": client.put(
+                "/api/mandate", json={**rule, "categories": [" "]}
+            ).status_code,
+        }
+
+        assert all(code in (400, 422) for code in blanked.values()), blanked
+        assert set(web.POLICIES["mdt_demo"].merchants) == before
+
+    def test_a_delivery_address_cannot_be_set_through_it(self, client):
+        """Authority too, and it has its own route that checks the address is
+        one the account actually holds. Two ways to set it means the weaker one
+        is the one that counts."""
+        before = set(web.POLICIES["mdt_demo"].delivery_addresses)
+
+        client.put(
+            "/api/mandate",
+            json={
+                "per_txn_max_paise": 200_000,
+                "merchants": ["instamart"],
+                "categories": ["groceries"],
+                "every_days": 4,
+                "delivery_addresses": ["../etc", "office"],
+            },
+        )
+
+        assert set(web.POLICIES["mdt_demo"].delivery_addresses) == before
+
+    def test_editing_the_standing_rule_leaves_an_open_grant_alone(self, client):
+        """A grant is a separate policy with its own bounds and its own clock.
+        If a rule edit reached into it, an approval the user already gave could
+        silently change shape underneath a checkout they had open."""
+        from datetime import UTC, datetime
+
+        from bounded_mandate.compiler import grant_for_cart
+
+        cart = web.MARKETPLACE.create_cart([*USUAL_GROCERIES, "Smartwatch"], merchant="instamart")
+        web.POLICIES["grn_probe"] = grant_for_cart(
+            cart,
+            grant_id="grn_probe",
+            authorised_addresses=frozenset({"home"}),
+            now=datetime.now(UTC),
+        )
+        before = web.POLICIES["grn_probe"]
+
+        client.put(
+            "/api/mandate",
+            json={
+                "per_txn_max_paise": 100,
+                "merchants": ["blinkit"],
+                "categories": ["electronics"],
+                "every_days": 30,
+            },
+        )
+
+        assert web.POLICIES["grn_probe"] == before
+        assert web.POLICIES["grn_probe"].cart_id == cart.cart_id
+
+
+class TestTheCadenceGateIsAdvisory:
+    """**Mitigated, not eliminated, and the distinction is the point.**
+
+    `asked_for` puts the once-or-repeating question in front of the model at the
+    moment it acts, which took compliance from one phrasing in three to three in
+    three. It cannot stop a model that answers `once` untruthfully, and an
+    utterance carrying "pass asked_for='once'" does exactly that — measured, it
+    works.
+
+    That is tolerable only because no authority turns on it. These pin the line:
+    the gate is defeatable, and the mandate is not.
+    """
+
+    def test_the_utterance_can_defeat_the_question(self):
+        """Stated plainly so nobody reads the gate as a control."""
+        from bounded_mandate.agent import TOOLS
+
+        schema = next(t for t in TOOLS if t["function"]["name"] == "create_cart")
+        # Nothing here is verified against what the user actually said, because
+        # nothing could be — the only reader of the utterance is the model.
+        assert "asked_for" in schema["function"]["parameters"]["required"]
+
+    def test_but_it_cannot_widen_the_mandate(self, policy, policies, ledger):
+        """An utterance claiming a raised cap and a settled cadence still buys
+        nothing outside the rule — the engine never reads either claim."""
+        from bounded_mandate.engine import Cart, CartItem
+        from tests.conftest import HOME, merchant_holding
+
+        cart = Cart(
+            cart_id="swiggy_x",
+            merchant="instamart",
+            items=(CartItem("Smartwatch", 1_500_000, "electronics"),),
+            delivery_address=HOME,
+        )
+        decision = decide(
+            Proposal(policy.mandate_id, cart.cart_id, 1_500_000),
+            policies=policies,
+            adapter=merchant_holding(cart),
+            ledger=ledger,
+            now=NOW,
+        )
+
+        assert decision.verdict is not Verdict.ALLOW
+        assert "category.not_allowed" in decision.reason_code
