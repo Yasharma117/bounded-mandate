@@ -356,3 +356,87 @@ def test_reason_prose_is_written_for_a_person_not_a_form(policy, policies, ledge
     prose = " ".join(reason.detail for reason in decision.reasons)
     assert "(s)" not in prose
     assert "1 item outside your scope" in prose
+
+
+# --- the window counts money, not opinions -----------------------------------
+#
+# An ALLOW whose order was never created spent nothing. Counting it as a charge
+# meant a gateway hiccup consumed the user's cadence: the engine said yes, no
+# order existed, and the next attempt was refused for a purchase that never
+# happened. A window of one, so each of these proves something.
+
+
+def rail_failed(ledger, decision):
+    """What `_settle` writes when the gateway will not answer."""
+    ledger.append(
+        {
+            "event": "RAIL_FAILED",
+            "idempotency_key": decision.idempotency_key,
+            "cart_id": decision.cart_id,
+            "total_paise": decision.total_paise,
+            "detail": "razorpay is not answering",
+        }
+    )
+
+
+def test_an_allow_the_rail_refused_does_not_spend_the_window(policy, ledger):
+    policies = {"mdt_1": replace(policy, max_charges_per_window=1)}
+    adapter = merchant_holding(groceries(), groceries(cart_id="cart_2"))
+
+    first = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    assert first.verdict is Verdict.ALLOW
+    rail_failed(ledger, first)
+
+    # A different basket, in a window that permits one order. Nothing was
+    # bought, so nothing is exceeded.
+    second = run(Proposal("mdt_1", "cart_2", 185_000), policies, adapter, ledger)
+    assert second.verdict is Verdict.ALLOW, second.reason_code
+    assert "frequency.exceeded" not in second.reason_code
+
+
+def test_retrying_a_cart_the_rail_refused_is_not_a_duplicate(policy, ledger):
+    """`duplicate.suppressed` exists to stop one cart being authorised twice.
+    A cart that was allowed and never charged has been authorised zero times."""
+    policies = {"mdt_1": replace(policy, max_charges_per_window=1)}
+    adapter = merchant_holding(groceries())
+
+    first = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    rail_failed(ledger, first)
+
+    retry = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    assert retry.verdict is Verdict.ALLOW, retry.reason_code
+    assert "duplicate.suppressed" not in retry.reason_code
+
+
+def test_an_allow_that_did_reach_the_rail_still_spends_the_window(policy, ledger):
+    """The other half, and the one that matters: discounting a failure must not
+    become discounting a purchase. Same shape as the test above, without the
+    `RAIL_FAILED` — and the answer has to flip."""
+    policies = {"mdt_1": replace(policy, max_charges_per_window=1)}
+    adapter = merchant_holding(groceries(), groceries(cart_id="cart_2"))
+
+    run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+
+    second = run(Proposal("mdt_1", "cart_2", 185_000), policies, adapter, ledger)
+    assert "frequency.exceeded" in second.reason_code
+
+
+def test_a_rail_failure_for_another_mandate_does_not_free_this_one(policy, ledger):
+    """The discount is keyed by idempotency key, which is derived from the
+    mandate — so one mandate's outage cannot buy another mandate a window."""
+    policies = {"mdt_1": replace(policy, max_charges_per_window=1)}
+    adapter = merchant_holding(groceries(), groceries(cart_id="cart_2"))
+
+    run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    ledger.append(
+        {
+            "event": "RAIL_FAILED",
+            "idempotency_key": "a_key_belonging_to_something_else",
+            "cart_id": "cart_9",
+            "total_paise": 185_000,
+            "detail": "razorpay is not answering",
+        }
+    )
+
+    second = run(Proposal("mdt_1", "cart_2", 185_000), policies, adapter, ledger)
+    assert "frequency.exceeded" in second.reason_code

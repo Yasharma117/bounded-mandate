@@ -277,6 +277,27 @@ struct SpeechFilterTests {
         #expect(!Voice.isSpeech("uh"))
         #expect(!Voice.isSpeech("."))
     }
+
+    /// The two-word floor is right for something volunteered and wrong for a
+    /// reply. The cadence gate asks "once, or every time?" and the honest
+    /// answer to that is one word — which the filter was discarding, so voice
+    /// mode silently ignored the exact answer it had just asked for.
+    @Test func oneWordAnswersAreAnswers() {
+        #expect(Voice.isSpeech("once"))
+        #expect(Voice.isSpeech("repeat"))
+        #expect(Voice.isSpeech("weekly"))
+        #expect(Voice.isSpeech("yes"))
+        #expect(Voice.isSpeech("No."))       // punctuation and case are noise
+        #expect(Voice.isSpeech("[music] once"))
+    }
+
+    /// The hole in the floor is answers, not any single word. A television
+    /// saying "groceries" is still not an instruction.
+    @Test func aLoneWordThatIsNotAnAnswerIsStillNoise() {
+        #expect(!Voice.isSpeech("groceries"))
+        #expect(!Voice.isSpeech("instamart"))
+        #expect(!Voice.isSpeech("thousand"))
+    }
 }
 
 /// A turn should leave cards behind. Spoken numbers are the one thing a voice

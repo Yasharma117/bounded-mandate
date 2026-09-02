@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -552,6 +553,34 @@ def test_a_list_can_be_deleted(client):
     assert client.delete("/api/list/breakfast").status_code == 404
 
 
+def test_a_deleted_list_stays_deleted_across_a_restart(client, tmp_path, monkeypatch):
+    """It did not. Every other mutation of `LISTS` saved; delete alone did not,
+    so a list vanished from the screen and was still on disk — and came back
+    the next time the engine started, which reads like the delete button not
+    working two hours after it appeared to."""
+    monkeypatch.setattr(web, "LISTS_PATH", tmp_path / "lists.json")
+    # Something else has to be written first, or there is no file to read back
+    # and `load_lists()` answers `None` for the wrong reason.
+    client.put("/api/list/usual/schedule", json={"every_days": 9})
+
+    client.delete("/api/list/breakfast")
+
+    restored = web.load_lists()
+    assert restored is not None, "nothing was written"
+    assert "breakfast" not in restored
+    assert "usual" in restored
+
+
+def test_a_list_cannot_run_every_zero_days(client):
+    """`ge=0` made `next_due` answer `last_run_at` itself, so the list was due on
+    every tick forever: a refusal every twenty seconds and a ledger full of
+    noise. The Swift stepper already refused it; the API did not."""
+    assert client.post("/api/lists", json={"name": "Nonstop", "every_days": 0}).status_code == 422
+    assert client.put("/api/list/usual/schedule", json={"every_days": 0}).status_code == 422
+    # One day is still a schedule, and still allowed.
+    assert client.put("/api/list/usual/schedule", json={"every_days": 1}).status_code == 200
+
+
 # --- the scheduler ----------------------------------------------------------
 
 
@@ -778,7 +807,7 @@ def test_every_pack_carries_its_own_verdict(client, monkeypatch):
         image_url="",
         variants=(pack("1 ltr", 7_700), pack("1 ltr x 12", 300_000)),
     )
-    monkeypatch.setattr(web.MARKETPLACE, "describe", lambda name: (listing, []))
+    monkeypatch.setattr(web.MARKETPLACE, "describe", lambda name, merchant=None: (listing, []))
     cap = web.POLICIES["mdt_demo"].per_txn_max_paise
     assert 7_700 <= cap < 300_000, "the fixture no longer straddles the cap"
 
@@ -802,7 +831,7 @@ def test_a_discount_is_shown_only_where_one_exists(client, monkeypatch):
             Variant("b", "", "Curd", "1 kg", 15_000, 15_000, "", True),
         ),
     )
-    monkeypatch.setattr(web.MARKETPLACE, "describe", lambda name: (listing, []))
+    monkeypatch.setattr(web.MARKETPLACE, "describe", lambda name, merchant=None: (listing, []))
 
     packs = client.get("/api/product", params={"name": "Curd"}).json()["product"]["variants"]
 
@@ -1189,3 +1218,453 @@ def test_an_unreadable_lists_file_falls_back_to_the_seeds(tmp_path, monkeypatch)
 
     bad.write_text("{ truncated")
     assert web.load_lists() is None
+
+
+# --- the rail failing is a fact, not a 500 ----------------------------------
+#
+# `decide()` writes the ALLOW before `_settle` ever reaches Razorpay, and it
+# should: the ledger records decisions. What used to happen is that a dead
+# gateway turned that into a bare 500 while the ledger and the home screen went
+# on saying the order was placed — the engine's own account of itself
+# disagreeing with what the caller was told, about the same basket.
+
+
+def _rail_refuses(client, monkeypatch):
+    """Make the charge leg fail the way an unreachable gateway does."""
+
+    def refuse(**_kwargs):
+        raise GatewayError("razorpay is not answering")
+
+    monkeypatch.setattr(client.gateway, "create_charge_order", refuse)
+
+
+def test_a_dead_rail_answers_with_the_decision_not_a_500(client, monkeypatch):
+    _rail_refuses(client, monkeypatch)
+    out = client.post("/api/proposal", json={"items": USUAL, "claimed_total_paise": 185_000})
+
+    assert out.status_code == 200, out.text
+    body = out.json()
+    # The decision stands. It was allowed; that part is true and stays true.
+    assert body["verdict"] == "ALLOW"
+    # And the money leg is reported as what it was.
+    assert body["order_id"] is None
+    assert "razorpay is not answering" in body["rail_error"]
+    assert body["settlement"] == "Allowed, but the rail refused it"
+
+
+def test_the_rail_failure_is_written_down(client, monkeypatch):
+    _rail_refuses(client, monkeypatch)
+    propose(client, USUAL, 185_000)
+
+    events = [e.payload for e in web.LEDGER.entries()]
+    failed = [e for e in events if e.get("event") == "RAIL_FAILED"]
+    assert len(failed) == 1
+    # Keyed to the decision it belongs to, which is how home finds it again.
+    allowed = next(e for e in events if e.get("verdict") == "ALLOW")
+    assert failed[0]["idempotency_key"] == allowed["idempotency_key"]
+    web.LEDGER.verify()  # and the chain still covers it
+
+
+def test_home_does_not_claim_an_order_the_rail_refused(client, monkeypatch):
+    _rail_refuses(client, monkeypatch)
+    propose(client, USUAL, 185_000)
+
+    home = client.get("/api/home").json()
+    # The bug: this said `ruled` — "Ordered — placed while you were away" —
+    # about a basket that reached no shop.
+    assert home["state"] == "needs_you"
+    assert "rail refused" in home["headline"]
+    assert "Nothing was charged" in home["detail"]
+
+
+def test_a_working_rail_is_untouched_by_any_of_this(client):
+    out = propose(client, USUAL, 185_000)
+    assert out["order_id"] == "order_charge_1"
+    assert out.get("rail_error") is None
+    assert client.get("/api/home").json()["state"] == "ruled"
+
+
+# --- a cap the rail cannot honour is not a cap -------------------------------
+
+
+def test_a_rule_cap_below_the_rails_floor_is_refused(client):
+    """The engine would have allowed a ₹0.50 basket and Razorpay would have
+    refused to charge for it — the same "allowed, and no order" split the
+    `RAIL_FAILED` tests above are about, arriving through the rule instead of
+    through a dead gateway. Cheaper to refuse the cap."""
+    rule = client.get("/api/mandate").json()
+    body = {
+        "per_txn_max_paise": 50,
+        "merchants": rule["merchants"],
+        "categories": rule["categories"],
+        "every_days": rule["every_days"],
+    }
+    assert client.put("/api/mandate", json=body).status_code == 422
+    # ₹1 exactly is the rail's own floor and is allowed.
+    assert client.put("/api/mandate", json={**body, "per_txn_max_paise": 100}).status_code == 200
+
+
+# --- one place decides which shop -------------------------------------------
+#
+# Lists priced themselves at the rule's merchant, the scheduler hardcoded
+# `instamart`, and the agent fell back to the same constant. A rule naming any
+# other shop rendered its list correctly and then had every scheduled run
+# refused `merchant.not_allowed`. The bound held — which is the point — and the
+# product underneath it did not work.
+
+
+def _rule_at(client, merchant: str) -> None:
+    rule = client.get("/api/mandate").json()
+    out = client.put(
+        "/api/mandate",
+        json={
+            "per_txn_max_paise": rule["per_txn_max_paise"],
+            "merchants": [merchant],
+            "categories": rule["categories"],
+            "every_days": rule["every_days"],
+        },
+    )
+    assert out.status_code == 200, out.text
+
+
+def test_the_scheduler_shops_where_the_rule_says(client):
+    _rule_at(client, "blinkit")
+
+    ran = client.post("/api/lists/run-due").json()["ran"]
+    assert ran, "nothing was due"
+    for run in ran:
+        if "error" in run:
+            continue
+        assert run["merchant"] == "blinkit"
+        assert "merchant.not_allowed" not in (run.get("reason_code") or "")
+
+
+def test_the_list_and_the_scheduler_agree_about_the_shop(client):
+    _rule_at(client, "blinkit")
+
+    listed = client.get("/api/lists").json()["lists"]
+    assert {row["merchant"] for row in listed} == {"blinkit"}
+
+
+def test_a_product_sheet_answers_about_the_shop_it_was_asked_about(client):
+    """`/api/product?merchant=blinkit` used to come back with Instamart as the
+    main product and `merchant_allowed: false` stamped on it — the sheet telling
+    you your own rule forbids the shop you were looking at."""
+    _rule_at(client, "blinkit")
+
+    out = client.get("/api/product", params={"name": "Aashirvaad atta 5kg", "merchant": "blinkit"})
+    assert out.status_code == 200, out.text
+    body = out.json()
+    assert body["product"]["merchant"] == "blinkit"
+    assert body["product"]["merchant_allowed"] is True
+    # The other shops are still offered, as alternatives — and the shop that was
+    # asked about is not one of its own alternatives.
+    assert "blinkit" not in {alt["merchant"] for alt in body["alternatives"]}
+
+
+# --- letting an approval go --------------------------------------------------
+
+
+def test_an_approval_can_be_let_go_before_it_is_spent(client):
+    """The button existed before the route did. `dismiss()` keys off a
+    decision's idempotency key, and the grant-live state carries a grant id and
+    no decision — so "Let it lapse" guarded out and did nothing while the card
+    went on counting down."""
+    escalated = propose(client, [*USUAL, "Bluetooth earbuds", "Phone case"], 240_000)
+    granted = client.post("/api/mandate/one-time", json={"cart_id": escalated["cart_id"]}).json()
+    grant_id = granted["grant"]["grant_id"]
+    assert client.get(f"/api/grant/{grant_id}").json()["state"] == "ready"
+
+    assert client.post(f"/api/grant/{grant_id}/lapse").json()["state"] == "expired"
+
+    # And it hands out no checkout afterwards, so an open tab cannot spend it.
+    after = client.get(f"/api/grant/{grant_id}").json()
+    assert after["state"] == "expired"
+    assert after["order_id"] is None
+    assert any(e.payload.get("event") == "LAPSED" for e in web.LEDGER.entries())
+
+
+def test_a_spent_approval_cannot_be_lapsed(client):
+    """There is nothing left to withdraw, and saying otherwise would put a
+    'let it lapse' beside money that has already moved."""
+    escalated = propose(client, [*USUAL, "Bluetooth earbuds", "Phone case"], 240_000)
+    granted = client.post("/api/mandate/one-time", json={"cart_id": escalated["cart_id"]}).json()
+    grant_id = granted["grant"]["grant_id"]
+    order_id = client.get(f"/api/grant/{grant_id}").json()["order_id"]
+    client.post(
+        "/api/settlement/verify",
+        json={
+            "razorpay_order_id": order_id,
+            "razorpay_payment_id": "pay_1",
+            "razorpay_signature": "sig",
+        },
+    )
+
+    assert client.post(f"/api/grant/{grant_id}/lapse").status_code == 409
+
+
+def test_lapsing_something_that_is_not_there_is_a_404(client):
+    assert client.post("/api/grant/grant_nope/lapse").status_code == 404
+
+
+def test_a_rule_cannot_name_a_shop_this_build_cannot_reach(client, monkeypatch):
+    """Found live, not in the mock: the registration page compiles free text, so
+    "from Blinkit" against a backend that is Instamart alone registered happily
+    and then refused `merchant.not_allowed` on every scheduled run forever. The
+    bound held — the rule was simply unsatisfiable, and nothing said so."""
+    rule = client.get("/api/mandate").json()
+    body = {
+        "per_txn_max_paise": rule["per_txn_max_paise"],
+        "merchants": ["blinkit"],
+        "categories": rule["categories"],
+        "every_days": rule["every_days"],
+    }
+    # On the mock all three shops exist, so this is a rule that works.
+    assert client.put("/api/mandate", json=body).status_code == 200
+
+    # Live is Instamart alone, and `_shops()` already knows it.
+    monkeypatch.setattr(web, "_shops", lambda: ["instamart"])
+    out = client.put("/api/mandate", json=body)
+    assert out.status_code == 422
+    assert "cannot reach blinkit" in out.json()["detail"]
+
+
+# --- an approval that is no longer live cannot be spent -----------------------
+#
+# Found by stress-testing the lapse route, not by reading it. `verify_settlement`
+# matched on "is this our order, and is it unpaid" and never asked whether the
+# authority behind it still stood — so a checkout tab left open past the fifteen
+# minutes, or one belonging to an approval the account holder had explicitly let
+# go, settled exactly like a live one and the app said "Paid — it is on its way".
+
+
+def test_a_lapsed_approval_cannot_be_settled(client):
+    """The whole promise of the button. Letting an approval go has to mean it
+    cannot be spent, not merely that the card stops offering to spend it."""
+    escalated = propose(client, [*USUAL, "Bluetooth earbuds", "Phone case"], 240_000)
+    granted = client.post("/api/mandate/one-time", json={"cart_id": escalated["cart_id"]}).json()
+    grant_id = granted["grant"]["grant_id"]
+    order_id = client.get(f"/api/grant/{grant_id}").json()["order_id"]
+
+    client.post(f"/api/grant/{grant_id}/lapse")
+
+    out = client.post(
+        "/api/settlement/verify",
+        json={
+            "razorpay_order_id": order_id,
+            "razorpay_payment_id": "pay_late",
+            "razorpay_signature": "sig",
+        },
+    )
+    assert out.status_code == 409
+    assert client.get(f"/api/grant/{grant_id}").json()["state"] == "expired"
+
+
+def test_an_expired_approval_cannot_be_settled(client):
+    """Same hole, reached by the clock instead of the button — and this half was
+    latent long before the button existed."""
+    escalated = propose(client, [*USUAL, "Bluetooth earbuds", "Phone case"], 240_000)
+    granted = client.post("/api/mandate/one-time", json={"cart_id": escalated["cart_id"]}).json()
+    grant_id = granted["grant"]["grant_id"]
+    order_id = client.get(f"/api/grant/{grant_id}").json()["order_id"]
+
+    grant = web.GRANTS[grant_id]
+    grant.policy = replace(grant.policy, expires_at=datetime.now(UTC) - timedelta(minutes=1))
+
+    out = client.post(
+        "/api/settlement/verify",
+        json={
+            "razorpay_order_id": order_id,
+            "razorpay_payment_id": "pay_late",
+            "razorpay_signature": "sig",
+        },
+    )
+    assert out.status_code == 409
+
+
+def test_a_settlement_against_dead_authority_is_written_down(client):
+    """Refused, and recorded. The signature was genuine, so something may well
+    have moved at Razorpay's end — and money moving against withdrawn authority
+    is precisely the event this product exists to make visible."""
+    escalated = propose(client, [*USUAL, "Bluetooth earbuds", "Phone case"], 240_000)
+    granted = client.post("/api/mandate/one-time", json={"cart_id": escalated["cart_id"]}).json()
+    grant_id = granted["grant"]["grant_id"]
+    order_id = client.get(f"/api/grant/{grant_id}").json()["order_id"]
+    client.post(f"/api/grant/{grant_id}/lapse")
+
+    client.post(
+        "/api/settlement/verify",
+        json={
+            "razorpay_order_id": order_id,
+            "razorpay_payment_id": "pay_late",
+            "razorpay_signature": "sig",
+        },
+    )
+
+    entries = [e.payload for e in web.LEDGER.entries()]
+    anomaly = next(e for e in entries if e.get("event") == "UNAUTHORISED_SETTLEMENT")
+    assert anomaly["razorpay_payment_id"] == "pay_late"
+    assert anomaly["grant_state"] == "expired"
+    # And it is not counted as a settlement, which would make home say "Paid".
+    assert not any(e.get("event") == "SETTLED" for e in entries)
+    assert client.get("/api/home").json()["state"] != "paid"
+
+
+def test_deleting_every_list_does_not_bring_the_seeded_ones_back(client, tmp_path, monkeypatch):
+    """`return restored or None` read an empty file as "nothing was saved", so
+    the caller fell back to the seeds — and deleting every list and restarting
+    handed them all back. Unreadable is the only thing that means no answer.
+
+    Asserted through `initial_lists()`, which is what startup actually calls.
+    An earlier version of this test asserted `load_lists() == {}` and passed
+    while the bug was still live, because the falsy-empty-dict mistake had been
+    fixed in the reader and left in the `load_lists() or seed_lists()` beside
+    it. Testing the half you just edited is how that survives."""
+    monkeypatch.setattr(web, "LISTS_PATH", tmp_path / "lists.json")
+    for list_id in list(web.LISTS):
+        client.delete(f"/api/list/{list_id}")
+
+    assert web.load_lists() == {}
+    assert web.initial_lists() == {}, "startup handed the seeded lists back"
+
+
+def test_a_first_run_with_nothing_saved_still_gets_the_seeds(tmp_path, monkeypatch):
+    """The other half. `None` means no answer, and no answer still means seeds —
+    an engine that booted with no lists at all would be a blank product."""
+    monkeypatch.setattr(web, "LISTS_PATH", tmp_path / "never_written.json")
+
+    assert web.load_lists() is None
+    assert web.initial_lists(), "a fresh install booted with no lists"
+
+
+def test_an_unreadable_lists_file_still_gets_the_seeds(tmp_path, monkeypatch):
+    """Refusing to start is worse than losing an edit, so garbage falls back."""
+    path = tmp_path / "lists.json"
+    path.write_text("{ this is not json", encoding="utf-8")
+    monkeypatch.setattr(web, "LISTS_PATH", path)
+
+    assert web.load_lists() is None
+    assert web.initial_lists()
+
+
+# --- a gateway hiccup must not cost the user four days -----------------------
+
+
+def _dead_rail(client, monkeypatch):
+    def refuse(**_kwargs):
+        raise GatewayError("razorpay is not answering")
+
+    monkeypatch.setattr(client.gateway, "create_charge_order", refuse)
+
+
+def test_a_rail_failure_does_not_spend_the_cadence(client, monkeypatch):
+    """The scheduler marked a list as run whatever happened. A refusal is a
+    verdict and deserves that; a rail failure is not — the engine said yes and
+    the gateway did not answer, so nothing was decided against the list and
+    nothing was bought. Marking it run meant a four-day cadence was spent on a
+    gateway hiccup and the groceries silently did not come."""
+    for list_id in [x for x in web.LISTS if x != "usual"]:
+        client.delete(f"/api/list/{list_id}")
+    _dead_rail(client, monkeypatch)
+
+    ran = web.run_due_lists()
+    assert ran[0]["verdict"] == "ALLOW"
+    assert ran[0]["order_id"] is None
+    assert web.LISTS["usual"].last_run_at is None, "the cadence was spent on a failure"
+
+    # And the retry actually works, rather than tripping the engine's own
+    # frequency and duplicate bounds on a purchase that never happened.
+    monkeypatch.setattr(client.gateway, "create_charge_order", lambda **k: "order_back")
+    again = web.run_due_lists()
+    assert len(again) == 1
+    assert again[0]["verdict"] == "ALLOW", again[0]["reason_code"]
+    assert again[0]["order_id"] == "order_back"
+    assert web.LISTS["usual"].last_run_at is not None
+
+
+def test_a_successful_run_still_spends_the_cadence(client):
+    """The control. A list that went out must not go out again on the next tick."""
+    for list_id in [x for x in web.LISTS if x != "usual"]:
+        client.delete(f"/api/list/{list_id}")
+
+    assert len(web.run_due_lists()) == 1
+    assert web.LISTS["usual"].last_run_at is not None
+    assert web.run_due_lists() == [], "it ran twice"
+
+
+def test_recovering_from_an_outage_still_honours_the_order_window(client, monkeypatch):
+    """The question the fix raises. Two lists can both be allowed during an
+    outage, because neither bought anything. When the rail comes back and both
+    retry, the window permits one — and exactly one must get it."""
+    _dead_rail(client, monkeypatch)
+    outage = web.run_due_lists()
+    assert len(outage) == 2
+    assert all(r["order_id"] is None for r in outage)
+
+    monkeypatch.setattr(client.gateway, "create_charge_order", lambda **k: "order_back")
+    back = web.run_due_lists()
+
+    created = [r for r in back if r["order_id"]]
+    assert len(created) == 1, f"{len(created)} orders in a one-order window"
+    assert any("frequency.exceeded" in (r.get("reason_code") or "") for r in back)
+
+
+def test_an_outage_is_not_hidden_behind_a_later_basket(client, monkeypatch):
+    """One scheduler tick can rail-fail one list and then escalate the next.
+    Home keyed off the newest decision, so the second hid the first — an outage
+    affecting every order, reported as one basket wanting attention."""
+    _dead_rail(client, monkeypatch)
+    web.run_due_lists()
+    # Something newer, and refused, on top of the outage.
+    propose(client, [*USUAL, "Smartwatch"], 185_000)
+
+    home = client.get("/api/home").json()
+    assert home["state"] == "needs_you"
+    assert "rail refused" in home["headline"], home["headline"]
+    assert "your cadence was not spent" in home["detail"]
+
+
+def test_a_dismissed_outage_stops_being_the_headline(client, monkeypatch):
+    """It is a card, not a wall. Swiping it away has to let the screen move on.
+
+    One list, so there is exactly one outage to dismiss — with two, dismissing
+    the first correctly leaves the second still asking."""
+    for list_id in [x for x in web.LISTS if x != "usual"]:
+        client.delete(f"/api/list/{list_id}")
+    _dead_rail(client, monkeypatch)
+    web.run_due_lists()
+    home = client.get("/api/home").json()
+    assert "rail refused" in home["headline"]
+
+    client.post("/api/home/seen", json={"idempotency_key": home["decision"]["idempotency_key"]})
+    assert "rail refused" not in client.get("/api/home").json()["headline"]
+
+
+def test_the_delivery_address_is_pinned_to_the_shop_on_boot(client, monkeypatch):
+    """Swiggy holds the delivery address on the session, and the session dies
+    with the process. Nothing put it back, so after every restart the adapter
+    fell back to the first address on the account while the rule still named the
+    one the user chose — and every order was refused `delivery.unknown_address`
+    about a choice they had already made."""
+    seen: list[str] = []
+    monkeypatch.setattr(web.MARKETPLACE, "use_address", seen.append)
+    monkeypatch.setattr(web, "DELIVERY_ID", "addr_the_user_chose")
+
+    web.restore_delivery_address()
+
+    assert seen == ["addr_the_user_chose"]
+
+
+def test_a_shop_that_is_down_does_not_stop_the_engine_booting(client, monkeypatch):
+    """One live call to a grocer, on the critical path of starting up. An engine
+    that refuses to boot because the shop is unreachable is worse than one that
+    starts and reports it on `/api/home`."""
+
+    from bounded_mandate.swiggy import SwiggyUnavailable
+
+    def unreachable(_address_id):
+        raise SwiggyUnavailable("the token lapsed five days ago")
+
+    monkeypatch.setattr(web.MARKETPLACE, "use_address", unreachable)
+
+    web.restore_delivery_address()  # must not raise

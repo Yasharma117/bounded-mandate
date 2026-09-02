@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -43,18 +44,27 @@ from .compiler import GrantRefused, compile_mandate, grant_for_cart
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import ChainBroken, Ledger
 from .merchant import MERCHANT_NAME, UnknownItem, UnknownMerchant
-from .razorpay_gateway import GatewayAuthError, GatewayError, RazorpayGateway, SignatureMismatch
+from .razorpay_gateway import (
+    MIN_AMOUNT_PAISE,
+    GatewayAuthError,
+    GatewayError,
+    RazorpayGateway,
+    SignatureMismatch,
+)
 from .swiggy import ADDRESS_ID as SWIGGY_ADDRESS_ID
 from .swiggy import SwiggyUnavailable
 from .swiggy_mcp import SwiggySessionError
 from .voice import SPEAKERS, TTS_PROVIDER, VoiceUnavailable, speak, transcribe
 from .wording import action, chip, summary, title
 
+log = logging.getLogger(__name__)
+
 
 @contextlib.asynccontextmanager
 async def _lifespan(_: FastAPI):
     """Run the scheduler for as long as the app is up, if it is switched on."""
     load_grants()
+    restore_delivery_address()
     task = asyncio.create_task(_scheduler()) if os.environ.get("BM_SCHEDULER") == "1" else None
     try:
         yield
@@ -241,10 +251,28 @@ def load_lists() -> dict[str, ShoppingList] | None:
         restored = {row["list_id"]: _list_from(row) for row in saved.get("lists") or []}
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         return None
-    return restored or None
+    # `restored or None` would be wrong: a file that reads as no lists is the
+    # answer "you deleted them all", and returning `None` for it makes the
+    # caller fall back to the seeds — so deleting every list and restarting
+    # handed them all back. Unreadable is the only thing that means "no answer".
+    return restored
 
 
-LISTS: dict[str, ShoppingList] = load_lists() or seed_lists()
+def initial_lists() -> dict[str, ShoppingList]:
+    """What the engine boots with: the remembered lists, or the seeds.
+
+    A function, not an inline `load_lists() or seed_lists()`, because that
+    expression carried the same bug `load_lists` had just been fixed for — `{}`
+    is falsy, so an account that had deleted every list was indistinguishable
+    from one that had never saved, and startup handed the seeds back. Fixing the
+    reader and leaving the expression fixed nothing, and a test on the reader
+    alone passed over it. `None` means no answer; a dict is the answer.
+    """
+    restored = load_lists()
+    return seed_lists() if restored is None else restored
+
+
+LISTS: dict[str, ShoppingList] = initial_lists()
 #: The standing mandate. One in this build; a name rather than a literal so the
 #: routes that read and write it cannot drift apart from the one that seeds it.
 MANDATE_ID = "mdt_demo"
@@ -414,21 +442,41 @@ def _settle(decision, cart_items: int) -> dict:
     """An ALLOW is the only thing that reaches the rail. The order is created
     server-side with nobody present — that half of settlement needs no mandate.
     On an account with recurring enabled the engine would go on to debit the
-    token silently; without one, the order is where the money leg stops."""
+    token silently; without one, the order is where the money leg stops.
+
+    **A rail failure is recorded, not raised.** `decide()` has already written
+    the ALLOW by the time this runs, and it should have: the ledger is a record
+    of decisions, and the decision to allow was genuinely made. What used to
+    happen is that a dead gateway turned that into a bare 500 while the ledger
+    and the home screen went on saying the order was placed — the engine's own
+    account of itself disagreeing with what the caller was told. So the failure
+    becomes an entry of its own, the same way a halted delivery does, and the
+    surfaces read it.
+    """
     if decision.verdict is not Verdict.ALLOW:
         return {"order_id": None, "key_id": None}
-    gw = gateway()
     try:
+        gw = gateway()
         order_id = gw.create_charge_order(
             amount_paise=decision.total_paise,
             idempotency_key=decision.idempotency_key,
             description=f"Bounded Mandate · {cart_items} items",
             customer_id=customer_id(gw),
         )
-    except GatewayAuthError as exc:
-        raise HTTPException(401, str(exc)) from exc
-    except GatewayError as exc:
-        raise HTTPException(500, str(exc)) from exc
+    except (GatewayError, HTTPException) as exc:
+        # `gateway()` raises HTTPException(503) when the keys are missing, which
+        # is the same event as the gateway refusing us: allowed, and no order.
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        LEDGER.append(
+            {
+                "event": "RAIL_FAILED",
+                "idempotency_key": decision.idempotency_key,
+                "cart_id": decision.cart_id,
+                "total_paise": decision.total_paise,
+                "detail": str(detail),
+            }
+        )
+        return {"order_id": None, "key_id": None, "rail_error": str(detail)}
     return {"order_id": order_id, "key_id": gw.key_id}
 
 
@@ -482,6 +530,8 @@ def _rendered(decision, *, claimed_total_paise: int, cart_items: int) -> dict:
             if settled.get("payment_id")
             else "Order placed, not yet paid"
             if settled.get("order_id")
+            else "Allowed, but the rail refused it"
+            if settled.get("rail_error")
             else "Nothing was charged"
         ),
         "cart_id": decision.cart_id,
@@ -519,7 +569,10 @@ class RuleEdit(BaseModel):
     there deliberately. Restating all four is the point, not an inconvenience.
     """
 
-    per_txn_max_paise: int = Field(gt=0, le=MAX_CAP_PAISE)
+    # The floor is the rail's, not ours. A cap below ₹1 is a cap Razorpay will
+    # not charge against, so it would produce an ALLOW the payment leg refuses
+    # — the engine saying yes and the money saying no, about the same basket.
+    per_txn_max_paise: int = Field(ge=MIN_AMOUNT_PAISE, le=MAX_CAP_PAISE)
     merchants: list[str] = Field(min_length=1)
     categories: list[str] = Field(min_length=1)
     every_days: int = Field(ge=1, le=365)
@@ -676,6 +729,19 @@ def set_rule(body: RuleEdit) -> dict:
     if not merchants or not categories:
         raise HTTPException(422, "a rule needs at least one shop and one category")
 
+    # A shop this build cannot reach is not a rule, it is a guaranteed refusal.
+    # `_rule_view` already serves `merchant_options` so the controls cannot
+    # offer one; the registration page compiles free text, where "from Blinkit"
+    # under a live backend that is Instamart alone used to register happily and
+    # then refuse `merchant.not_allowed` on every scheduled run forever.
+    unreachable = merchants - set(_shops())
+    if unreachable:
+        raise HTTPException(
+            422,
+            f"this build cannot reach {', '.join(sorted(unreachable))}. "
+            f"Shops it can reach: {', '.join(_shops())}.",
+        )
+
     POLICIES[MANDATE_ID] = replace(
         current,
         per_txn_max_paise=body.per_txn_max_paise,
@@ -715,6 +781,23 @@ def _rule_view(policy: Policy) -> dict:
         "merchant_options": _shops(),
         "category_options": list(KNOWN),
     }
+
+
+def rule_merchant() -> str:
+    """Which shop the standing rule shops at.
+
+    One function because there were three answers. Lists priced themselves at
+    the rule's merchant, the scheduler hardcoded `instamart`, and the agent fell
+    back to `MERCHANT_NAME` when the model named no shop — so a rule set to any
+    other shop rendered its list correctly and then had every scheduled run
+    refused `merchant.not_allowed`. The bound held, which is the point; the
+    product underneath it did not work.
+
+    Sorted rather than `next(iter(...))`: `frozenset` iteration order is not
+    stable across processes, and a default shop that changes on restart is a
+    worse bug than the one this replaces.
+    """
+    return sorted(POLICIES[MANDATE_ID].merchants)[0]
 
 
 def _shops() -> list[str]:
@@ -951,6 +1034,44 @@ def read_grant(grant_id: str) -> dict:
     }
 
 
+@app.post("/api/grant/{grant_id}/lapse")
+def lapse_grant(grant_id: str) -> dict:
+    """Let an approval go, now, rather than waiting out its fifteen minutes.
+
+    The button offering this existed before the route did. It called the
+    dismiss path, which keys off a decision's idempotency key — and the
+    grant-live state carries a `grant_id` and no decision, so the tap did
+    nothing at all and the card sat there counting down.
+
+    Lapsing is expiry brought forward, not a new kind of ending: `expires_at`
+    moves to now so `state()` answers `expired` through the same branch it
+    always would, and the policy is revoked so `decide()` refuses anything
+    still holding the id. A paid grant is not lapsable — the money already
+    moved, and there is nothing left to withdraw.
+    """
+    grant = GRANTS.get(grant_id)
+    if grant is None:
+        raise HTTPException(404, "no such approval")
+    if grant.payment_id:
+        raise HTTPException(409, "this approval was already spent")
+
+    now = datetime.now(UTC)
+    grant.policy = replace(grant.policy, expires_at=now, status=MandateStatus.REVOKED)
+    POLICIES[grant.grant_id] = grant.policy
+    save_grants()
+
+    LEDGER.append(
+        {
+            "event": "LAPSED",
+            "grant_id": grant.grant_id,
+            "cart_id": grant.cart_id,
+            "total_paise": grant.amount_paise,
+            "detail": "The account holder let the approval go before it was spent.",
+        }
+    )
+    return {"grant_id": grant.grant_id, "state": grant.state(now)}
+
+
 @app.get("/pay", response_class=HTMLResponse)
 def pay_page() -> str:
     """Real Razorpay Standard Checkout, for the half of the product that has a
@@ -1118,6 +1239,37 @@ def verify_settlement(body: Callback) -> dict:
     )
     if grant is None:
         raise HTTPException(400, "no open grant matches this order")
+
+    # An approval that is no longer live cannot be spent, and until now it
+    # could: the match above asks only "is this our order, and is it unpaid" —
+    # never whether the authority behind it still stands. So a checkout tab left
+    # open past the fifteen minutes, or one belonging to an approval the account
+    # holder had explicitly let go, settled exactly like a live one and the app
+    # said "Paid — it is on its way".
+    #
+    # Recorded rather than only refused. The signature was real, so something
+    # may well have moved at Razorpay's end — and money that moved against
+    # withdrawn authority is precisely the event this whole product exists to
+    # make visible. Refusing it quietly would leave the one party who needs to
+    # know with nothing to look at.
+    state = grant.state()
+    if state != "ready":
+        LEDGER.append(
+            {
+                "event": "UNAUTHORISED_SETTLEMENT",
+                "razorpay_order_id": body.razorpay_order_id,
+                "razorpay_payment_id": body.razorpay_payment_id,
+                "signature_verified": True,
+                "grant_id": grant.grant_id,
+                "grant_state": state,
+                "total_paise": grant.amount_paise,
+                "detail": (
+                    f"A signed callback arrived for an approval that was {state}. "
+                    "The signature is genuine; the authority is not."
+                ),
+            }
+        )
+        raise HTTPException(409, f"this approval is {state} and cannot be spent")
 
     # The grant is now spent. Razorpay would refuse a second payment on a paid
     # order anyway; revoking here means our own store says so too, rather than
@@ -1290,9 +1442,9 @@ def product_detail(name: str, merchant: str = MERCHANT_NAME) -> dict:
     thing it sells is not, and collapsing them names the wrong reason on the one
     screen somebody opened in order to choose.
     """
-    policy = POLICIES["mdt_demo"]
+    policy = POLICIES[MANDATE_ID]
     try:
-        listing, alternatives = MARKETPLACE.describe(name)
+        listing, alternatives = MARKETPLACE.describe(name, merchant)
     except SHOP_DOWN as exc:
         raise shop_down(exc) from exc
     if listing is None:
@@ -1331,7 +1483,7 @@ def product_detail(name: str, merchant: str = MERCHANT_NAME) -> dict:
 
     # On the mock an alternative is the same product at another shop and says
     # so; live, it is another product at the shop we are already in.
-    here = merchant if is_live() else MERCHANT_NAME
+    here = merchant
     return {
         "product": described(listing, listing.merchant or here),
         "alternatives": [described(alt, alt.merchant or here) for alt in alternatives],
@@ -1395,6 +1547,28 @@ def all_addresses() -> dict:
     return {"addresses": _address_rows(), "delivery_id": DELIVERY_ID}
 
 
+def restore_delivery_address() -> None:
+    """Tell the shop where we deliver, on the way up.
+
+    `PUT /api/address` pushes the choice down to Swiggy, which holds the
+    delivery address on the session — but the session dies with the process and
+    nothing put it back. On the next boot `DELIVERY_ID` and the policy both
+    still said Guesthouse while the adapter, unpinned, fell back to the first
+    address on the account (Office). Every cart the agent built then shipped
+    somewhere the rule did not authorise, and every order was refused
+    `delivery.unknown_address` — a correct refusal about a choice the user had
+    already made and the engine had simply forgotten to repeat.
+
+    Never fatal. This is one live call to a shop that may be unreachable or
+    holding a lapsed token, and an engine that refuses to boot because the
+    grocer is down is worse than one that starts and says so on `/api/home`.
+    """
+    try:
+        MARKETPLACE.use_address(DELIVERY_ID)
+    except Exception as exc:  # noqa: BLE001 - boot must not depend on the shop
+        log.warning("could not pin the delivery address at startup: %s", exc)
+
+
 @app.put("/api/address")
 def choose_address(body: AddressChoice) -> dict:
     """Deliver here from now on. **A user action, and only a user action.**
@@ -1436,8 +1610,8 @@ def _list_rows(shopping: ShoppingList) -> dict:
     round trips to render one screen — so live lists show names and categories
     without prices rather than pretending to a total nobody fetched.
     """
-    policy = POLICIES["mdt_demo"]
-    seller = next(iter(policy.merchants))
+    policy = POLICIES[MANDATE_ID]
+    seller = rule_merchant()
     # Live lists carry no prices by design — a price per line is a
     # `search_products` per line — so an unreachable shop changes nothing here
     # and the `shop` block on `/api/home` is what reports it.
@@ -1554,14 +1728,18 @@ class NewList(BaseModel):
     name: str = Field(min_length=1)
     item_names: list[str] = Field(default_factory=list)
     kind: str = Field(default="standing", description="`standing` or `once`")
-    every_days: int | None = Field(default=None, ge=0, le=365)
+    # `ge=1`, not `ge=0`. A zero-day cadence makes `next_due` return
+    # `last_run_at` itself, so the list is due on every tick forever — a
+    # refusal every twenty seconds and a ledger full of noise. The Swift
+    # stepper already refuses it; the API used not to.
+    every_days: int | None = Field(default=None, ge=1, le=365)
     run_on: date | None = None
 
 
 class Schedule(BaseModel):
     """Every field optional — a schedule edit should not have to restate a list."""
 
-    every_days: int | None = Field(default=None, ge=0, le=365)
+    every_days: int | None = Field(default=None, ge=1, le=365)
     run_on: date | None = None
     paused: bool | None = None
 
@@ -1616,6 +1794,10 @@ def _fresh_id(name: str) -> str:
 def delete_list(list_id: str) -> dict:
     if LISTS.pop(list_id, None) is None:
         raise HTTPException(404, "no such list")
+    # Every other mutation of LISTS saves. This one did not, so a deleted list
+    # came back on the next restart — the list was gone from the screen and
+    # still on disk, which is the worst of both.
+    save_lists()
     return {"deleted": list_id}
 
 
@@ -1783,19 +1965,23 @@ class HomeState:
     list_id: str | None = None
 
 
-def _ledger_view() -> tuple[set[str], list[dict], list[dict]]:
+def _ledger_view() -> tuple[set[str], list[dict], list[dict], dict[str, str]]:
     """One pass over the ledger for everything home needs from it.
 
-    Dismissed keys, every decision oldest-first, and every settlement — which is
-    the only record that money actually moved rather than an order being placed.
+    Dismissed keys, every decision oldest-first, every settlement — which is the
+    only record that money actually moved rather than an order being placed —
+    and the decisions whose rail leg failed, keyed by idempotency key.
     """
     dismissed: set[str] = set()
     decisions: list[dict] = []
     settled: list[dict] = []
+    rail_failed: dict[str, str] = {}
     for entry in LEDGER.entries():
         payload = entry.payload
         if payload.get("event") == "SETTLED":
             settled.append({**payload, "ts": entry.ts})
+        elif payload.get("event") == "RAIL_FAILED":
+            rail_failed[payload.get("idempotency_key")] = payload.get("detail", "")
         elif payload.get("event") == "SEEN":
             dismissed.add(payload.get("idempotency_key"))
         elif payload.get("event") == "HALTED":
@@ -1810,7 +1996,7 @@ def _ledger_view() -> tuple[set[str], list[dict], list[dict]]:
             )
         elif payload.get("verdict"):
             decisions.append({**payload, "ts": entry.ts})
-    return dismissed, decisions, settled
+    return dismissed, decisions, settled, rail_failed
 
 
 def _needs_you(decision: dict) -> HomeState:
@@ -1876,10 +2062,39 @@ def _home_state(now: datetime | None = None) -> HomeState:
     everything because it is the only state where the product is stuck.
     """
     now = now or datetime.now(UTC)
-    dismissed, decisions, settlements = _ledger_view()
+    dismissed, decisions, settlements, rail_failed = _ledger_view()
     latest = next(
         (d for d in reversed(decisions) if d.get("idempotency_key") not in dismissed), None
     )
+
+    # A payment rail that will not answer outranks one basket needing a decision.
+    #
+    # Not `latest`, which is why this is its own search: a single scheduler tick
+    # can rail-fail one list and then escalate the next, and keying off the
+    # newest decision let the second hide the first — an outage affecting every
+    # order, reported as one basket wanting attention. It is the difference
+    # between one order stuck and all of them.
+    stuck = next(
+        (
+            d
+            for d in reversed(decisions)
+            if d.get("idempotency_key") in rail_failed
+            and d.get("idempotency_key") not in dismissed
+            and datetime.fromisoformat(d["ts"]) >= now - NEWS_WINDOW
+        ),
+        None,
+    )
+    if stuck is not None:
+        return HomeState(
+            "needs_you",
+            "Allowed, and the payment rail refused it.",
+            f"₹{stuck.get('total_paise', 0) / 100:,.0f} cleared your rule, but no order "
+            f"could be created. Nothing was charged, and your cadence was not spent — "
+            f"it will go out again on the next run. "
+            f"{rail_failed[stuck['idempotency_key']]}",
+            ("see_attempt",),
+            decision=stuck,
+        )
 
     if latest and latest["verdict"] != Verdict.ALLOW.value:
         return _needs_you(latest)
@@ -1934,11 +2149,20 @@ def _home_state(now: datetime | None = None) -> HomeState:
         rows = _list_rows(soon)
         when = soon.next_due(now)
         moment = "shortly" if when <= now else when.strftime("%-d %b at %H:%M")
+        # Live lists carry no prices — a price per line is a `search_products`
+        # per line — so "₹0 of your ₹2,000 cap" was not a small total, it was
+        # the absence of one, rendered as though the basket were free.
+        cap = f"₹{rows['cap_paise'] / 100:,.0f}"
+        detail = (
+            f"₹{rows['total_paise'] / 100:,.0f} of your {cap} cap. Nothing for you to do."
+            if rows["total_paise"]
+            else f"{len(rows['items'])} items, priced when it goes out. "
+            f"Your {cap} cap is applied then. Nothing for you to do."
+        )
         return HomeState(
             "preflight",
             f"{soon.name} goes out {moment}.",
-            f"₹{rows['total_paise'] / 100:,.0f} of your ₹{rows['cap_paise'] / 100:,.0f} cap. "
-            "Nothing for you to do.",
+            detail,
             ("pause", "view_basket"),
             list_id=soon.list_id,
         )
@@ -2107,7 +2331,10 @@ def run_due_lists(now: datetime | None = None) -> list[dict]:
         if not shopping.due(now):
             continue
         try:
-            cart = MARKETPLACE.create_cart(list(shopping.item_names), merchant="instamart")
+            # The rule's shop, not a constant. A scheduler that always went to
+            # Instamart under a rule naming anywhere else built a cart the
+            # engine was bound to refuse, every tick, forever.
+            cart = MARKETPLACE.create_cart(list(shopping.item_names), merchant=rule_merchant())
         except (UnknownMerchant, UnknownItem) as exc:
             out.append({"list_id": list_id, "error": str(exc.args[0])})
             continue
@@ -2124,21 +2351,30 @@ def run_due_lists(now: datetime | None = None) -> list[dict]:
             adapter=MARKETPLACE,
             ledger=LEDGER,
         )
-        # Marked as run whatever the verdict — a refused attempt still happened,
-        # and re-proposing the same basket every tick would look like probing.
-        LISTS[list_id] = shopping.ran(now)
-        # `last_run_at` is what keeps a due list from re-proposing on the next
-        # tick. Unsaved, a restart made every list due again at once.
-        save_lists()
+        rendered = _rendered(
+            decision, claimed_total_paise=cart.total_paise, cart_items=len(cart.items)
+        )
+        # Marked as run whatever the *verdict* — a refused attempt still
+        # happened, and re-proposing the same basket every tick would look like
+        # probing. But a rail failure is not a verdict. The engine said yes and
+        # the gateway did not answer, so nothing was decided against this list
+        # and nothing was bought; marking it run meant a four-day cadence was
+        # spent on a gateway hiccup and the groceries silently did not come.
+        #
+        # ponytail: retries at the tick rate with no backoff, so a long outage
+        # writes an ALLOW and a RAIL_FAILED every twenty seconds. Add a backoff
+        # if that is ever more than a nuisance — the money side is unaffected,
+        # since no order is created either way.
+        if not rendered.get("rail_error"):
+            LISTS[list_id] = shopping.ran(now)
+            # `last_run_at` is what keeps a due list from re-proposing on the
+            # next tick. Unsaved, a restart made every list due again at once.
+            save_lists()
         out.append(
             {
                 "list_id": list_id,
                 "name": shopping.name,
-                **_rendered(
-                    decision,
-                    claimed_total_paise=cart.total_paise,
-                    cart_items=len(cart.items),
-                ),
+                **rendered,
             }
         )
     return out

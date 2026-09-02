@@ -34,7 +34,16 @@ enum Engine {
     ) async throws -> AgentTurn {
         try await post(
             "/api/agent",
-            body: ["text": text, "history": history, "adversarial": adversarial]
+            body: ["text": text, "history": history, "adversarial": adversarial],
+            // One turn is not one request. The agent reads the list, builds a
+            // cart against a live shop and asks the engine to rule — four
+            // sequential model round trips and several Swiggy calls before a
+            // single byte comes back. Measured on this machine: 7s, 39s, 44s,
+            // 45s for the same sentence, so the 60s default was not a ceiling
+            // the slow runs cleared — it was one they crossed, and the demo
+            // read "the agent request timed out" about a request the engine
+            // was still happily working on.
+            timeout: 240
         )
     }
 
@@ -133,6 +142,13 @@ enum Engine {
 
     /// Put down what the home card is showing. Appended to the ledger rather
     /// than mutating anything: "the user looked at it" is an event.
+    /// Let a live approval go now, instead of waiting out its countdown.
+    static func lapseGrant(_ grantID: String) async throws {
+        struct Ack: Decodable { let state: String }
+        let encoded = grantID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+        let _: Ack = try await send("/api/grant/\(encoded ?? grantID)/lapse", method: "POST")
+    }
+
     static func markSeen(_ idempotencyKey: String) async throws {
         struct Ack: Decodable { let state: String }
         let _: Ack = try await send(
@@ -211,14 +227,31 @@ enum Engine {
         return wrapper.offers
     }
 
-    private static func post<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
+    /// A session of its own for the one call that is genuinely slow.
+    ///
+    /// Raising `URLRequest.timeoutInterval` is not enough on its own: the
+    /// session's `timeoutIntervalForRequest` applies as well, and
+    /// `URLSession.shared` carries the 60s default — so the request would have
+    /// gone on being cut off at sixty seconds by the session it was sent on,
+    /// and the one-line fix would have looked applied and changed nothing.
+    private static let patient: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 240
+        config.timeoutIntervalForResource = 300
+        return URLSession(configuration: config)
+    }()
+
+    private static func post<T: Decodable>(
+        _ path: String, body: [String: Any], timeout: TimeInterval = 60
+    ) async throws -> T {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        request.timeoutInterval = 60
+        request.timeoutInterval = timeout
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let session = timeout > 60 ? patient : URLSession.shared
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw Failure("No response") }
         guard (200..<300).contains(http.statusCode) else {
             let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"]

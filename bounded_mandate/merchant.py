@@ -255,7 +255,7 @@ class Marketplace:
             raise UnknownMerchant(f"no such shop: {merchant}. Shops are: {known}")
         return found
 
-    def describe(self, name: str):
+    def describe(self, name: str, merchant: str = MERCHANT_NAME):
         """The mock's answer to the same question, and a thinner one.
 
         One pack, no rating, no delivery estimate, no discount — because it has
@@ -263,6 +263,11 @@ class Marketplace:
         about a shop that does not exist. The alternatives are what the mock is
         actually good for: the same product at the other two shops, where the
         cheapest row is the one the rule refuses.
+
+        `merchant` is which shop is *asked*. It used to be ignored, so opening a
+        product under a rule naming another shop answered with Instamart's row
+        as the main product and stamped it `merchant_allowed: false` — the sheet
+        telling you your own rule forbids the shop you were looking at.
         """
         from .swiggy import Listing, Variant
 
@@ -287,16 +292,16 @@ class Marketplace:
                 ),
             )
 
-        here = self.merchants.get(MERCHANT_NAME)
+        here = self.merchants.get(merchant)
         item = here.catalog.get(name) if here else None
         if item is None:
             return None, []
         alternatives = [
             listing(seller, shop.catalog[name])
             for seller, shop in self.merchants.items()
-            if seller != MERCHANT_NAME and name in shop.catalog
+            if seller != merchant and name in shop.catalog
         ]
-        return listing(MERCHANT_NAME, item), alternatives
+        return listing(merchant, item), alternatives
 
     def search(self, query: str) -> list[Offer]:
         """Every seller's answer, cheapest first within each product."""

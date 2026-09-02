@@ -156,10 +156,16 @@ struct StateCard: View {
                             .foregroundStyle(line.flagged ? theme.textNormal : theme.textMuted)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
-                        Text(rupees(line.pricePaise))
-                            .font(.system(size: 11, weight: .medium))
-                            .monospacedDigit()
-                            .foregroundStyle(line.flagged ? tint : theme.textSubtle)
+                        // Only when there is one. A live list carries no
+                        // prices — fetching them is one shop call per line —
+                        // and rendering the absence as "₹0" put a free-looking
+                        // price tag on every item on the home screen.
+                        if line.pricePaise > 0 {
+                            Text(rupees(line.pricePaise))
+                                .font(.system(size: 11, weight: .medium))
+                                .monospacedDigit()
+                                .foregroundStyle(line.flagged ? tint : theme.textSubtle)
+                        }
                     }
                     .frame(width: 52)
                     .contentShape(.rect)

@@ -17,3 +17,7 @@ delivery.json
 .engine.log
 lists.json
 .engine.lock
+
+# Demo recording state — a scratch chain, never the real ledger.
+demo-state/
+.demo-archive/

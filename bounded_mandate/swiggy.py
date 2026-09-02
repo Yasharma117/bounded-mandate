@@ -499,8 +499,14 @@ class SwiggyAdapter:
                 )
         return offers
 
-    def describe(self, name: str) -> tuple[Listing | None, list[Listing]]:
+    def describe(
+        self, name: str, merchant: str = MERCHANT_NAME
+    ) -> tuple[Listing | None, list[Listing]]:
         """One product with its packs, and the products Swiggy calls similar.
+
+        `merchant` is accepted and ignored: live is Instamart alone, and there
+        is nowhere else to look. It exists so the route can pass the same
+        argument to either backend without asking which one it holds.
 
         A second read beside `search`, not a replacement for it. `search` is
         right for building a cart — one row per sku, because that is what

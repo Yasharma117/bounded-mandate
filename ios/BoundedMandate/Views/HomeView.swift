@@ -259,7 +259,11 @@ struct HomeView: View {
                 Card(tint: list.overCap ? theme.notice : nil) {
                     VStack(alignment: .leading, spacing: 7) {
                         Eyebrow(text: list.name, color: theme.textMuted)
-                        Text(rupees(list.totalPaise))
+                        // A live list carries no prices — one shop call per
+                        // line is too many to render a home screen — so the
+                        // total is genuinely unknown rather than zero, and
+                        // "₹0" read as a basket that costs nothing.
+                        Text(list.totalPaise > 0 ? rupees(list.totalPaise) : "\(list.items.count) items")
                             .font(.system(size: 20, weight: .semibold))
                             .monospacedDigit()
                             .foregroundStyle(theme.textNormal)
@@ -279,9 +283,11 @@ struct HomeView: View {
                         }
                         .frame(height: 3)
                         Text(
-                            list.overCap
-                                ? "\(rupees(-list.headroomPaise)) over your cap"
-                                : "\(rupees(list.headroomPaise)) under your cap"
+                            list.totalPaise == 0
+                                ? "Priced when it goes out"
+                                : list.overCap
+                                    ? "\(rupees(-list.headroomPaise)) over your cap"
+                                    : "\(rupees(list.headroomPaise)) under your cap"
                         )
                         .font(.system(size: 11))
                         .foregroundStyle(list.overCap ? theme.notice : theme.textMuted)
@@ -454,10 +460,22 @@ struct HomeView: View {
             Task { await classifyFlagged(home) }
         case "leave_out", "drop_flagged":
             Task { await dropFlagged(home) }
-        case "reauthorise", "cancel_basket":
+        case "reauthorise":
             showingAddress = true
-        case "not_now", "let_lapse":
+        case "cancel_basket":
+            // Dropping the staged basket, not choosing a new address for it.
+            // This shared an arm with `reauthorise`, so "Cancel basket" opened
+            // the address sheet — the one button on that card offering to *not*
+            // proceed took you further into proceeding.
             Task { await store.dismiss() }
+        case "not_now":
+            Task { await store.dismiss() }
+        case "let_lapse":
+            // Its own route, because `dismiss()` keys off a decision's
+            // idempotency key and the grant-live state carries a grant id and
+            // no decision — so this used to guard out and do nothing while the
+            // card went on counting down.
+            Task { await lapse(home) }
         case "pay":
             if let id = home.grantID, let url = Engine.url(forPath: "/pay?grant=\(id)") {
                 openURL(url)
@@ -488,8 +506,21 @@ struct HomeView: View {
         await store.load()
     }
 
+    /// Let a live approval go now rather than waiting out its countdown.
+    private func lapse(_ home: Home) async {
+        guard let id = home.grantID, !busy else { return }
+        busy = true
+        defer { busy = false }
+        try? await Engine.lapseGrant(id)
+        await store.load()
+    }
+
     private func setPaused(_ paused: Bool, _ home: Home) async {
-        guard let listID = home.listID ?? home.lists.first?.listID else {
+        // No fallback to `lists.first`. When the state names no list there is
+        // no "the" list to pause, and picking an arbitrary one meant a button
+        // labelled "Pause" quietly paused something the reader was not looking
+        // at. Open the sheet and let them say which.
+        guard let listID = home.listID else {
             showingList = true
             return
         }

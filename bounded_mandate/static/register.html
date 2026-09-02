@@ -78,9 +78,9 @@ const clearMsg = () => { $("msg").className = "msg"; };
 
 let bounds = null;
 
-async function post(url, body) {
+async function send(method, url, body) {
   const res = await fetch(url, {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -88,6 +88,8 @@ async function post(url, body) {
   if (!res.ok) throw new Error(data.detail || `${res.status} ${res.statusText}`);
   return data;
 }
+const post = (url, body) => send("POST", url, body);
+const put = (url, body) => send("PUT", url, body);
 
 const rupees = (paise) => "₹" + (paise / 100).toLocaleString("en-IN");
 
@@ -144,11 +146,30 @@ $("register").onclick = async () => {
       handler: async (response) => {
         try {
           const out = await post("/api/mandate/verify", response);
+
+          // Authorising the rail is not the same as setting the rule, and this
+          // page used to do only the first and claim both. `PUT /api/mandate`
+          // is the one route that creates authority — without it the ₹1 went
+          // through, the button said "Registered", and the engine went on
+          // enforcing whatever rule it already held.
+          await put("/api/mandate", {
+            per_txn_max_paise: bounds.per_txn_max_paise,
+            merchants: bounds.merchants,
+            categories: bounds.categories,
+            every_days: bounds.cadence_days,
+          });
+
           msg(`Registered. Orders inside your rule now run on their own.` +
               (out.token_id ? ` Mandate token ${out.token_id}.` : ""), "ok");
           $("register").textContent = "Registered";
         } catch (err) {
-          msg("Payment could not be verified — nothing was registered. " + err.message, "err");
+          // Two different failures, and the reader needs to know which. A bad
+          // signature means nothing happened; a rejected rule means the money
+          // leg is done and the bounds are not what this page just showed.
+          msg(err.message.includes("signature")
+              ? "Payment could not be verified — nothing was registered. " + err.message
+              : "Authorised, but the rule was not saved — your old rule still stands. " + err.message,
+              "err");
           $("register").disabled = false;
         }
       },

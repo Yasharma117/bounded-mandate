@@ -506,6 +506,19 @@ class BuyerAgent:
             "reasons": [r.detail for r in decision.reasons],
         }
 
+    def _default_merchant(self) -> str:
+        """Where to shop when the model named nowhere.
+
+        The rule's own shop, not a constant. This is a *default*, not a bound —
+        an agent that names a merchant outside the rule is still refused by
+        `decide()`, which is the guarantee. What this fixes is the silent case:
+        defaulting to Instamart under a rule that permits only Blinkit turned
+        every unspecified cart into a `merchant.not_allowed` refusal the user
+        never asked for.
+        """
+        policy = self.policies.get(self.mandate_id)
+        return sorted(policy.merchants)[0] if policy and policy.merchants else MERCHANT_NAME
+
     def _dispatch(self, run: AgentRun, name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "read_shopping_list":
             return self._read_shopping_list()
@@ -519,7 +532,7 @@ class BuyerAgent:
                 return {"error": "item_names must be a list of names"}
             return self._create_cart(
                 [str(n) for n in names],
-                str(args.get("merchant") or MERCHANT_NAME),
+                str(args.get("merchant") or self._default_merchant()),
                 str(args.get("asked_for") or "not_said"),
             )
         if name == "request_charge":

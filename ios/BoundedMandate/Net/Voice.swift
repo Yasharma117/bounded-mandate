@@ -65,11 +65,27 @@ enum Voice {
         ).trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !stripped.isEmpty else { return false }
-        // Two words is the shortest thing anyone says to a shopping agent, and
-        // it keeps a cough or a single mis-heard syllable out of the loop.
+        // Two words is the shortest thing anyone *volunteers* to a shopping
+        // agent, and it keeps a cough or a single mis-heard syllable out of the
+        // loop. It is the wrong floor for a reply: the cadence gate asks "once,
+        // or every time?" and the honest answer to that is one word. The filter
+        // was discarding the exact answer it had just asked for.
         let words = stripped.split { !$0.isLetter && !$0.isNumber }
+        if words.count == 1 { return replies.contains(String(words[0]).lowercased()) }
         return words.count >= 2
     }
+
+    /// One-word answers, which are answers and not commands.
+    ///
+    /// None of these reaches money on its own — the agent still has to propose
+    /// and the engine still has to rule — so a television saying "stop" costs a
+    /// wasted turn, not an order. That is the trade this list makes.
+    private static let replies: Set<String> = [
+        "yes", "no", "yeah", "nope", "ok", "okay", "sure",
+        "once", "repeat", "repeating", "again",
+        "daily", "weekly", "fortnightly", "monthly",
+        "approve", "confirm", "cancel", "stop", "skip",
+    ]
 
     /// Which services can speak, for the picker in voice mode.
     static func providers() async -> (available: [String], current: String) {

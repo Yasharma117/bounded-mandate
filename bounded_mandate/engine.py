@@ -305,18 +305,40 @@ def _history(ledger: Ledger, policy: Policy, now: datetime) -> _History:
     """
     since_window = (now - timedelta(days=policy.window_days)).isoformat()
     since_probe = (now - PROBE_WINDOW).isoformat()
-    charges, keys, denials = 0, set(), 0
+    allowed: list[tuple[str, str]] = []
+    rail_failed: set[str] = set()
+    denials = 0
     for entry in ledger.entries():
         p = entry.payload
+        # Collected before the mandate filter, because a rail failure is about a
+        # decision rather than a mandate and carries no mandate id. The key it
+        # does carry is mandate-specific already — it is derived from the
+        # mandate, the window and the cart — so this cannot cross wires.
+        if p.get("event") == "RAIL_FAILED":
+            rail_failed.add(p.get("idempotency_key"))
+            continue
         if p.get("mandate_id") != policy.mandate_id:
             continue
         if p.get("verdict") == Verdict.ALLOW.value:
-            if entry.ts >= since_window:
-                charges += 1
-            keys.add(p.get("idempotency_key"))
+            allowed.append((p.get("idempotency_key"), entry.ts))
         elif p.get("verdict") == Verdict.DENY.value and entry.ts >= since_probe:
             denials += 1
-    return _History(charges, frozenset(keys), denials)
+
+    # The window counts money, not opinions.
+    #
+    # An ALLOW whose order was never created spent nothing, and counting it as a
+    # charge meant a gateway hiccup consumed the user's cadence: the engine said
+    # yes, no order existed, and the next attempt was refused `frequency
+    # .exceeded` for a purchase that never happened. Same for the duplicate
+    # guard — re-authorising a cart that was allowed and never charged is the
+    # retry working, not a cart being paid for twice.
+    #
+    # This cannot widen authority. `RAIL_FAILED` is written in one place, only
+    # when the gateway itself raised, and it means no order exists — so what is
+    # being discounted here is a charge that provably did not happen.
+    spent = [(key, ts) for key, ts in allowed if key not in rail_failed]
+    charges = sum(1 for _, ts in spent if ts >= since_window)
+    return _History(charges, frozenset(key for key, _ in spent), denials)
 
 
 def _probe_reason(denials: int) -> list[Reason]:
