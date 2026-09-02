@@ -16,6 +16,7 @@ cd "$(dirname "$0")/.."
 
 PORT="${BM_PORT:-8117}"
 PIDFILE=".engine.pid"
+LOCKDIR=".engine.lock"
 LOGFILE=".engine.log"
 # Two different questions, two different endpoints.
 #
@@ -35,6 +36,16 @@ running() {  # a live pid from our own pidfile
 answering() { curl -fsS -o /dev/null --max-time 2 "$LIVE" 2>/dev/null; }
 
 start() {
+    # `mkdir` is atomic, which `[ -e ]` then `touch` is not. Three starts racing
+    # left one server on the port and a pidfile naming a different, dead process
+    # — so `stop` could no longer stop the thing that was running, which is the
+    # stale-server state this whole file exists to avoid. Measured, not feared.
+    if ! mkdir "$LOCKDIR" 2>/dev/null; then
+        echo "  another start is in progress"
+        return 1
+    fi
+    trap 'rmdir "$LOCKDIR" 2>/dev/null || true' RETURN
+
     if running; then
         echo "  already running (pid $(cat "$PIDFILE")) on :$PORT"; return 0
     fi
@@ -62,13 +73,26 @@ start() {
     [ -x "$SERVER" ] || { echo "  no $SERVER — run 'uv sync' first"; return 1; }
 
     python3 - "$SERVER" "$PORT" "$LOGFILE" "$PIDFILE" <<'LAUNCH'
-import subprocess, sys
+import signal, subprocess, sys
 server, port, logfile, pidfile = sys.argv[1:5]
+
+
+def detach():
+    """Runs in the child, between fork and exec.
+
+    A new session already means no controlling terminal, so the kernel sends no
+    SIGHUP when a terminal closes. Ignoring it as well is what `nohup` does and
+    costs nothing: `SIG_IGN` survives exec (a handler would not), so uvicorn
+    inherits it. Without this, an explicit SIGHUP still killed the engine.
+    """
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+
 with open(logfile, "ab") as log:
     child = subprocess.Popen(
         [server, "bounded_mandate.web:app", "--host", "0.0.0.0", "--port", port],
         stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-        start_new_session=True,
+        start_new_session=True, preexec_fn=detach,
     )
 open(pidfile, "w").write(str(child.pid) + "\n")
 LAUNCH

@@ -16,3 +16,4 @@ delivery.json
 .engine.pid
 .engine.log
 lists.json
+.engine.lock
