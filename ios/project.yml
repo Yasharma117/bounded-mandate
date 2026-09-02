@@ -22,12 +22,12 @@ targets:
     info:
       path: BoundedMandate/Info.plist
       properties:
-        CFBundleDisplayName: Bounded Mandate
+        CFBundleDisplayName: Warden
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSMicrophoneUsageDescription: >-
-          Bounded Mandate uses the microphone so you can speak your spending
+          Warden uses the microphone so you can speak your spending
           rules and orders instead of typing them.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

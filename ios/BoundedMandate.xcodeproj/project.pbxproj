@@ -52,6 +52,7 @@
 		B996BA93AC5014410769CEA1 /* grant_checkout.json in Resources */ = {isa = PBXBuildFile; fileRef = 607154604E21A84A7DDFA83C /* grant_checkout.json */; };
 		C66C9667FC1FB77471A33FD3 /* home_halted.json in Resources */ = {isa = PBXBuildFile; fileRef = 6FF36AF27E6CB981AD66A64A /* home_halted.json */; };
 		C9175BE14C157761031F15B0 /* turn_prices.json in Resources */ = {isa = PBXBuildFile; fileRef = 4B4772911BE45B54FA37B34F /* turn_prices.json */; };
+		C9671DE74FE29FC687F6F11C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B677F47A693CD3BE0ECAC7C3 /* Assets.xcassets */; };
 		D05291B2448BC8E244EBCAC5 /* home_escalated.json in Resources */ = {isa = PBXBuildFile; fileRef = 1F5BED49AD60F2396890F5EF /* home_escalated.json */; };
 		D1E861CE4594428BD4513065 /* ShoppingListCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B62812298D584BB58C041C20 /* ShoppingListCard.swift */; };
 		D222A73E8EBC8BD9E6A3CA96 /* BasketSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26FCAD97A2F22D708729DFC4 /* BasketSheet.swift */; };
@@ -133,6 +134,7 @@
 		B134C0D0247EF8BD2C49D1E9 /* MandateCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MandateCard.swift; sourceTree = "<group>"; };
 		B1804A7D5CDED7A536CCFDDC /* Grant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Grant.swift; sourceTree = "<group>"; };
 		B62812298D584BB58C041C20 /* ShoppingListCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShoppingListCard.swift; sourceTree = "<group>"; };
+		B677F47A693CD3BE0ECAC7C3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BCDF39B1D222BAA0CA0D7F2B /* LedgerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerSheet.swift; sourceTree = "<group>"; };
 		BD126AE709CB4010EFDE7B52 /* BoundedMandate.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BoundedMandate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C505FE655A597E914113A48C /* Bubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bubble.swift; sourceTree = "<group>"; };
@@ -153,6 +155,7 @@
 		105B43BF4E577C3FC7DA34A4 /* BoundedMandate */ = {
 			isa = PBXGroup;
 			children = (
+				B677F47A693CD3BE0ECAC7C3 /* Assets.xcassets */,
 				483AA4A36F0EBA528FDE34FD /* BoundedMandateApp.swift */,
 				E850AA83E9DF20D02B3CD3B9 /* Info.plist */,
 				7FD92369C2054F4909789245 /* Models */,
@@ -316,6 +319,7 @@
 			buildConfigurationList = 409718709EB02DCDCCE5CF12 /* Build configuration list for PBXNativeTarget "BoundedMandate" */;
 			buildPhases = (
 				1FCED185ACA14167F3337020 /* Sources */,
+				8D31C405A6749DAB9E7BF9A0 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -390,6 +394,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		8D31C405A6749DAB9E7BF9A0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C9671DE74FE29FC687F6F11C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		949E572BDA1F40287483F443 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;

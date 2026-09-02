@@ -196,7 +196,7 @@ struct ThreadView: View {
                 }
             }
             .background(backdrop)
-            .navigationTitle("Bounded Mandate")
+            .navigationTitle("Warden")
             .navigationBarTitleDisplayMode(.inline)
 
             .toolbar {
@@ -331,7 +331,7 @@ struct ThreadView: View {
     private var field: some View {
         Group {
             HStack(spacing: 10) {
-                TextField("Ask Bounded Mandate anything…", text: $draft)
+                TextField("Ask Warden anything…", text: $draft)
                     .focused($writing)
                     .submitLabel(.send)
                     .onSubmit(submit)

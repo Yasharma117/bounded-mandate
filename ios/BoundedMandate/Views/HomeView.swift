@@ -82,7 +82,7 @@ struct HomeView: View {
             }
             .scrollEdgeEffectStyle(.hard, for: .top)
             .background(backdrop)
-            .navigationTitle("Bounded Mandate")
+            .navigationTitle("Warden")
             // Inline, not large. The rule header directly below is the page's
             // real header, and a big title above it says the app's name twice
             // while spending a third of the screen to do it.
@@ -362,7 +362,7 @@ struct HomeView: View {
                 showingThread = true
             } label: {
                 HStack {
-                    Text("Ask Bounded Mandate anything…")
+                    Text("Ask Warden anything…")
                         .font(.system(size: 16))
                         .foregroundStyle(theme.textMuted)
                     Spacer()
