@@ -1144,3 +1144,48 @@ def test_a_missing_or_corrupt_delivery_file_is_not_fatal(tmp_path, monkeypatch):
     bad.write_text("{not json")
     monkeypatch.setattr(web, "DELIVERY_PATH", bad)
     assert web.load_delivery() is None
+
+
+def test_a_list_edit_outlives_a_restart(client, tmp_path, monkeypatch):
+    """**It did not.** `LISTS` was `seed_lists()` and nothing else, so every
+    restart discarded every edit — a line added, a cadence changed, a list
+    paused. It is the state the chat's own suggestion chips write to, so "I
+    added that and it went away" needed nothing unusual to reproduce."""
+    monkeypatch.setattr(web, "LISTS_PATH", tmp_path / "lists.json")
+
+    client.put("/api/list/usual", json={"item_names": ["Brown bread"], "categories": {}})
+    client.put("/api/list/usual/schedule", json={"every_days": 9, "paused": True})
+
+    restored = web.load_lists()
+
+    assert restored is not None, "nothing was written"
+    assert restored["usual"].item_names == ("Brown bread",)
+    assert restored["usual"].every_days == 9
+    assert restored["usual"].paused is True
+
+
+def test_lists_are_not_restored_across_a_backend_switch(tmp_path, monkeypatch):
+    """Item names are the merchant's namespace. A mock list restored onto a live
+    session is a dozen products Instamart has never heard of, and every line
+    would come back "not stocked"."""
+    monkeypatch.setattr(web, "LISTS_PATH", tmp_path / "lists.json")
+    monkeypatch.setattr(web, "BACKEND", "mock")
+    web.save_lists()
+    assert web.load_lists() is not None
+
+    monkeypatch.setattr(web, "BACKEND", "swiggy")
+    assert web.load_lists() is None
+
+
+def test_an_unreadable_lists_file_falls_back_to_the_seeds(tmp_path, monkeypatch):
+    """A convenience, not a source of truth. Losing an edit is bad; refusing to
+    boot because a file got truncated is worse."""
+    bad = tmp_path / "lists.json"
+    bad.write_text('{"backend": "mock", "lists": [{"no_list_id": true}]}')
+    monkeypatch.setattr(web, "LISTS_PATH", bad)
+    monkeypatch.setattr(web, "BACKEND", "mock")
+
+    assert web.load_lists() is None
+
+    bad.write_text("{ truncated")
+    assert web.load_lists() is None

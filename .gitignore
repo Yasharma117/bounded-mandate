@@ -13,3 +13,6 @@ __pycache__/
 grants.json
 ledger.jsonl
 delivery.json
+.engine.pid
+.engine.log
+lists.json

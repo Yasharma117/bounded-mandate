@@ -39,6 +39,7 @@ struct HomeView: View {
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @State private var store = HomeStore()
     @State private var showingList = false
     @State private var showingAddress = false
@@ -123,6 +124,17 @@ struct HomeView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { commandBar }
             .task { await store.load() }
+            // Coming back to the app reloads. The engine is a process on a
+            // laptop: it gets stopped, restarted, and started after the app was
+            // already open, and the screen that says "Can't reach the engine"
+            // is otherwise stuck there until somebody taps Try again. Returning
+            // to the foreground is exactly when that has usually been fixed.
+            //
+            // One reload, not a retry loop — a client hammering a dead socket
+            // makes the log unreadable at the moment you most need it.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await store.load() } }
+            }
             // Coming back from the thread, a sheet or the checkout, the state
             // may have moved — an approval mints a grant, a payment spends it.
             .onChange(of: showingThread) { if !showingThread { Task { await store.load() } } }

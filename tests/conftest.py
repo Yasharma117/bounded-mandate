@@ -133,6 +133,9 @@ def client(monkeypatch, tmp_path):
     # And the file it persists to, so choosing an address in a test cannot
     # write into the repo and be read back by the next run of the suite.
     monkeypatch.setattr(web, "DELIVERY_PATH", tmp_path / "delivery.json")
+    # Same for the lists, and for the same reason: persisted state read at
+    # import or written during a test leaks into the next run of the suite.
+    monkeypatch.setattr(web, "LISTS_PATH", tmp_path / "lists.json")
     c = TestClient(web.app)
     c.gateway = gw
     return c

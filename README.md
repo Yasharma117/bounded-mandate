@@ -380,10 +380,29 @@ nothing, because there is nothing in it — every credential lives in the engine
 process, and the phone talks only to the engine's host, including for voice.
 
 ```bash
-set -a; . ./.env; set +a
-uv run uvicorn bounded_mandate.web:app --host 0.0.0.0 --port 8117   # the engine
+./scripts/engine.sh start                                     # the engine
+cd ios && xcodegen generate && open BoundedMandate.xcodeproj  # the app
+```
 
-cd ios && xcodegen generate && open BoundedMandate.xcodeproj        # the app
+`engine.sh` also takes `stop`, `restart`, `status` and `log`. It starts the
+server in a session of its own, so closing the terminal — or anything that
+signals the process group that launched it — leaves it running. That is not
+hypothetical tidiness: started as an ordinary background child, the engine died
+every time its parent did, and the app's honest "Can't reach the engine" then
+looked like a new bug in whatever part of the product was on screen.
+
+`status` reports two different things, because they fail separately:
+
+```
+running (pid 55079) on :8117 — answering
+shop: swiggy  reachable=True
+```
+
+Foreground, if you would rather watch it:
+
+```bash
+set -a; . ./.env; set +a
+uv run uvicorn bounded_mandate.web:app --host 0.0.0.0 --port 8117
 ```
 
 `Engine.baseURL` defaults to `http://127.0.0.1:8117`, which the simulator

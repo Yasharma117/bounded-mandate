@@ -200,4 +200,26 @@ final class SurfaceTests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
         capture("survived-voice-exit")
     }
+
+    func testReturningToTheAppReloadsFromTheEngine() {
+        waitForHome()
+
+        // The engine is a process on a laptop: it gets stopped and started
+        // while the app is open, and the "Can't reach the engine" screen used
+        // to sit there until somebody tapped Try again. Coming back to the app
+        // is when that has usually just been fixed.
+        //
+        // Backgrounding and re-activating, not relaunching — a relaunch fires
+        // `.task` and would pass whether or not `scenePhase` is wired up.
+        XCUIDevice.shared.press(.home)
+        sleep(2)
+        app.activate()
+
+        XCTAssertTrue(
+            app.staticTexts["LEDGER"].waitForExistence(timeout: 20),
+            "the app did not come back"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+        capture("after-foreground")
+    }
 }

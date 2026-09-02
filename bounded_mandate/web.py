@@ -171,7 +171,80 @@ LEDGER = Ledger(os.environ.get("BM_LEDGER", "ledger.jsonl"))
 MARKETPLACE = build_commerce()
 # The user's lists. Owned by the user, read by the agent, and there is no route
 # and no agent tool that lets the agent write one — see `basket`.
-LISTS: dict[str, ShoppingList] = seed_lists()
+#: The user's lists, kept between runs.
+#:
+#: They were `seed_lists()` and nothing else, so every restart threw away every
+#: edit — a line added, a cadence changed, a list paused. It is the last piece
+#: of state that silently reset, and the one the chat's own suggestion chips
+#: write to, so "I added that and it went away" was reachable without anybody
+#: doing anything unusual.
+#:
+#: Same shape as `delivery.json` beside it, including the backend tag: item
+#: names are the merchant's namespace, and a mock list restored onto a live
+#: session is a dozen products Instamart has never heard of.
+LISTS_PATH = Path(os.environ.get("BM_LISTS", "lists.json"))
+
+
+def _list_json(shopping: ShoppingList) -> dict:
+    return {
+        "list_id": shopping.list_id,
+        "name": shopping.name,
+        "item_names": list(shopping.item_names),
+        "categories": dict(shopping.categories),
+        "kind": shopping.kind.value,
+        "every_days": shopping.every_days,
+        "run_on": shopping.run_on.isoformat() if shopping.run_on else None,
+        "last_run_at": shopping.last_run_at.isoformat() if shopping.last_run_at else None,
+        "paused": shopping.paused,
+    }
+
+
+def _list_from(raw: dict) -> ShoppingList:
+    return ShoppingList(
+        list_id=str(raw["list_id"]),
+        name=str(raw["name"]),
+        item_names=tuple(raw.get("item_names") or ()),
+        categories=dict(raw.get("categories") or {}),
+        kind=ListKind(raw.get("kind") or ListKind.STANDING.value),
+        every_days=raw.get("every_days"),
+        run_on=date.fromisoformat(raw["run_on"]) if raw.get("run_on") else None,
+        last_run_at=(
+            datetime.fromisoformat(raw["last_run_at"]) if raw.get("last_run_at") else None
+        ),
+        paused=bool(raw.get("paused")),
+    )
+
+
+def save_lists() -> None:
+    """Write the lists out. Called after anything that changes one."""
+    LISTS_PATH.write_text(
+        json.dumps(
+            {"backend": BACKEND, "lists": [_list_json(x) for x in LISTS.values()]}, indent=1
+        ),
+        encoding="utf-8",
+    )
+
+
+def load_lists() -> dict[str, ShoppingList] | None:
+    """The remembered lists, if they still belong to this backend.
+
+    A convenience, not a source of truth: anything unreadable falls back to the
+    seeds rather than taking the engine down on boot. A list is the user's
+    document and losing an edit is bad; refusing to start is worse.
+    """
+    if not LISTS_PATH.exists():
+        return None
+    try:
+        saved = json.loads(LISTS_PATH.read_text(encoding="utf-8"))
+        if saved.get("backend") != BACKEND:
+            return None
+        restored = {row["list_id"]: _list_from(row) for row in saved.get("lists") or []}
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+    return restored or None
+
+
+LISTS: dict[str, ShoppingList] = load_lists() or seed_lists()
 #: The standing mandate. One in this build; a name rather than a literal so the
 #: routes that read and write it cannot drift apart from the one that seeds it.
 MANDATE_ID = "mdt_demo"
@@ -1525,6 +1598,7 @@ def create_list(body: NewList) -> dict:
         every_days=body.every_days,
         run_on=body.run_on,
     )
+    save_lists()
     return _list_rows(LISTS[list_id])
 
 
@@ -1562,6 +1636,7 @@ def set_schedule(list_id: str, body: Schedule) -> dict:
         run_on=body.run_on or shopping.run_on,
         paused=body.paused if body.paused is not None else shopping.paused,
     )
+    save_lists()
     return _list_rows(LISTS[list_id])
 
 
@@ -1607,6 +1682,7 @@ def write_list(list_id: str, body: ListEdit) -> dict:
         item_names=tuple(body.item_names),
         categories={name: category for name, category in kept.items() if category},
     )
+    save_lists()
     return _list_rows(LISTS[list_id])
 
 
@@ -2051,6 +2127,9 @@ def run_due_lists(now: datetime | None = None) -> list[dict]:
         # Marked as run whatever the verdict — a refused attempt still happened,
         # and re-proposing the same basket every tick would look like probing.
         LISTS[list_id] = shopping.ran(now)
+        # `last_run_at` is what keeps a due list from re-proposing on the next
+        # tick. Unsaved, a restart made every list due again at once.
+        save_lists()
         out.append(
             {
                 "list_id": list_id,
