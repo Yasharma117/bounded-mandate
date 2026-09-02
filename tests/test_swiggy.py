@@ -997,3 +997,58 @@ class TestLiveOrdersWereBrokenInThreeWays:
         assert _fold("gas") == "gas", "too short to be a plural"
         assert _fold("grass") == "grass", "-ss is not a plural"
         assert _fold("milk") == "milk"
+
+
+# --- a grocer's gateway blips ------------------------------------------------
+
+
+def test_a_transient_mcp_failure_is_retried(monkeypatch):
+    """The same `/api/product` call answered 200 and then 503 a minute later
+    with nothing changed. One blip surfaced as a red "shop unreachable" banner
+    on the home screen — an outage notice about a shop that was up."""
+    from bounded_mandate import swiggy
+
+    adapter = SwiggyAdapter.__new__(SwiggyAdapter)
+    tries = {"n": 0}
+
+    def flaky(tool, **params):
+        tries["n"] += 1
+        if tries["n"] < 3:
+            raise RuntimeError("503 Service Unavailable")
+        return {"addresses": []}
+
+    monkeypatch.setattr(adapter, "_call", flaky, raising=False)
+    monkeypatch.setattr(swiggy.time, "sleep", lambda _s: None)
+
+    assert adapter._invoke("get_addresses") == {"addresses": []}
+    assert tries["n"] == 3, "it gave up too early"
+
+
+def test_a_shop_that_is_really_down_still_says_so(monkeypatch):
+    """The retry must not turn a genuine outage into a hang or a lie."""
+    from bounded_mandate import swiggy
+
+    adapter = SwiggyAdapter.__new__(SwiggyAdapter)
+    tries = {"n": 0}
+
+    def dead(tool, **params):
+        tries["n"] += 1
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(adapter, "_call", dead, raising=False)
+    monkeypatch.setattr(swiggy.time, "sleep", lambda _s: None)
+
+    with pytest.raises(SwiggyUnavailable, match="connection refused"):
+        adapter._invoke("get_addresses")
+    assert tries["n"] == swiggy.MCP_ATTEMPTS
+
+
+def test_no_retry_can_reach_an_order_placing_tool():
+    """The property that makes retrying safe. `update_cart` replaces the basket
+    and `clear_cart` empties it, so both are idempotent — and the two tools that
+    would actually spend money are not callable at all."""
+    from bounded_mandate.swiggy import ALLOWED_TOOLS
+
+    assert "checkout" not in ALLOWED_TOOLS
+    assert "confirm_order" not in ALLOWED_TOOLS
+    assert "order" not in ALLOWED_TOOLS

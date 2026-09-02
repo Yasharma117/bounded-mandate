@@ -37,7 +37,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -96,6 +98,10 @@ def canonical_address(address_id: str) -> str:
 
 #: What the MCP layer looks like from in here: a tool name and its parameters.
 CallTool = Callable[..., dict]
+
+
+#: How many times a read is worth re-asking before the shop is called down.
+MCP_ATTEMPTS = 4
 
 
 class SwiggyUnavailable(RuntimeError):
@@ -774,13 +780,44 @@ class SwiggyAdapter:
     # --- the only place a tool name is spoken -------------------------------
 
     def _invoke(self, tool: str, **params: object) -> dict:
+        """One MCP call, retried when Swiggy drops it on the floor.
+
+        Measured, not feared: the same `/api/product?name=Eggs (12)` answered
+        200 and then 503 a minute later with nothing changed, and a burst of
+        eight straight after that was clean. A grocer's gateway blips, and one
+        blip surfaced as a red "shop unreachable" banner on the home screen and
+        a dead product sheet — an outage notice about a shop that was up.
+
+        Safe to retry because of what is on the other end, not because it is
+        convenient. `ALLOWED_TOOLS` holds three reads and two writes, and
+        `checkout`/`confirm_order` are deliberately absent — so no retry here
+        can place an order. Both writes are idempotent: `update_cart` *replaces*
+        the session cart with exactly the items given (see `build_cart`), and
+        `clear_cart` empties it. Sending either twice lands the same basket as
+        sending it once.
+
+        It lives at the one point every call funnels through rather than at each
+        caller, so the product sheet, the cart build and the address book all
+        get it without five chances to forget one.
+
+        ponytail: fixed backoff, no circuit breaker. A shop that is genuinely
+        down costs four attempts before it says so, which is the right trade
+        against a banner that cries wolf during a demo.
+        """
         if tool not in ALLOWED_TOOLS:
             raise SwiggyUnavailable(f"{tool} is not a tool this adapter may call")
-        try:
-            result = self._call(tool, **params)
-        except Exception as exc:
-            raise SwiggyUnavailable(f"{tool} failed: {exc}") from exc
-        return result if isinstance(result, dict) else {}
+        last: Exception | None = None
+        for attempt in range(MCP_ATTEMPTS):
+            try:
+                result = self._call(tool, **params)
+            except Exception as exc:  # noqa: BLE001 — re-raised below once spent
+                last = exc
+                if attempt == MCP_ATTEMPTS - 1:
+                    raise SwiggyUnavailable(f"{tool} failed: {exc}") from exc
+                time.sleep((0.3 * 2**attempt) + random.uniform(0, 0.2))
+                continue
+            return result if isinstance(result, dict) else {}
+        raise SwiggyUnavailable(f"{tool} failed: {last}")  # unreachable
 
 
 def _category_for(name: str, assigned: dict[str, str]) -> str:
