@@ -198,6 +198,11 @@ struct ThreadView: View {
             .background(backdrop)
             .navigationTitle("Warden")
             .navigationBarTitleDisplayMode(.inline)
+            // Leaving the screen ends the session. `stopTalking` was reachable
+            // only from the stop button, so closing mid-turn left the loop
+            // running against a `Thread` that `@State` was about to tear down —
+            // and the microphone open behind a screen nobody could see.
+            .onDisappear { stopTalking() }
 
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

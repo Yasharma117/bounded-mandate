@@ -41,9 +41,22 @@ final class VoiceSession {
     private(set) var problem: String?
 
     /// Where turns go. The thread is the conversation; this only speaks into it.
-    private unowned let thread: Thread
+    ///
+    /// **Weak, not `unowned`.** `unowned` asserts the thread outlives the
+    /// session, which is true right up until somebody closes the voice screen
+    /// mid-turn: `ThreadView` owns the `Thread` in `@State`, dismissing the
+    /// cover tears that down, and the session's `loop` task is still running a
+    /// round trip that then touches it. Swift traps that as
+    /// `swift_abortRetainUnowned` and the app dies — `EXC_CRASH / SIGABRT`, no
+    /// message, no recovery.
+    ///
+    /// Weak turns the same moment into nothing happening, which is the correct
+    /// outcome: the screen the answer was going to is gone, so there is nowhere
+    /// for it to land and no reason to shout about it.
+    private weak var thread: Thread?
 
     init(thread: Thread) { self.thread = thread }
+
 
     /// Stop after this much quiet **once you have actually said something**.
     private let silenceSeconds: TimeInterval = 1.4
@@ -188,6 +201,13 @@ final class VoiceSession {
 
     private func answer(_ heard: String) async {
         let key = UUID().uuidString
+        // Gone means the screen was dismissed while this turn was in flight.
+        // Nothing to append to and nothing to say — stop rather than continue
+        // into a round trip whose answer has nowhere to go.
+        guard let thread else {
+            stop()
+            return
+        }
         thread.append(.said(id: "u-\(key)", from: .user, text: heard))
 
         do {

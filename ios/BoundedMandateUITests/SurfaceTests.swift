@@ -173,4 +173,31 @@ final class SurfaceTests: XCTestCase {
         )
         capture("home-after-address")
     }
+
+    func testLeavingVoiceMidSessionDoesNotKillTheApp() {
+        waitForHome()
+
+        // The crash: `VoiceSession` held its `Thread` `unowned`, `ThreadView`
+        // owns that `Thread` in `@State`, and `stopTalking` was reachable only
+        // from the stop button. Closing the screen while the loop was running
+        // tore the thread down under a live task — `swift_abortRetainUnowned`,
+        // `EXC_CRASH / SIGABRT`, no message.
+        app.buttons["Talk to it"].tap()
+        XCTAssertTrue(
+            app.buttons["Back"].waitForExistence(timeout: 15),
+            "the thread screen did not open"
+        )
+        sleep(3)  // let the session actually start before leaving
+
+        app.buttons["Back"].tap()
+
+        // Alive is the whole assertion. If the teardown regressed, the process
+        // is gone by now and this cannot find anything.
+        XCTAssertTrue(
+            app.staticTexts["LEDGER"].waitForExistence(timeout: 15),
+            "the app did not survive leaving voice mode"
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+        capture("survived-voice-exit")
+    }
 }
