@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .basket import ShoppingList
+from .commerce import offer_parts
 from .engine import Decision, Policy, Proposal, decide
 from .ledger import Ledger
 from .llm import MODEL, default_client
@@ -381,17 +382,22 @@ class BuyerAgent:
         }
 
     def _search_catalog(self, query: str) -> dict[str, Any]:
-        return {
-            "offers": [
+        """Normalised through `offer_parts`, because the two backends answer
+        `search` with different shapes and this was written against one of
+        them. On a live session it raised `AttributeError` on the first search
+        and the route returned 502 — no cart, no order, no reason given."""
+        offers = []
+        for offer in self.marketplace.search(query):
+            seller, item = offer_parts(offer)
+            offers.append(
                 {
-                    "merchant": offer.merchant,
-                    "name": offer.item.name,
-                    "price_paise": offer.item.price_paise,
-                    "category": offer.item.category or "unknown",
+                    "merchant": seller,
+                    "name": item.name,
+                    "price_paise": item.price_paise,
+                    "category": getattr(item, "category", "") or "unknown",
                 }
-                for offer in self.marketplace.search(query)
-            ]
-        }
+            )
+        return {"offers": offers}
 
     def _create_cart(
         self, item_names: list[str], merchant: str, asked_for: str = "not_said"

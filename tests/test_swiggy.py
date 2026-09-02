@@ -929,3 +929,71 @@ class TestNameResolution:
 
         assert len(sent["items"]) == 1, "the same product was sent as three lines"
         assert sent["items"][0]["quantity"] == 3
+
+
+# --- the three that stopped live orders entirely ------------------------------
+
+
+class TestLiveOrdersWereBrokenInThreeWays:
+    """Two consecutive runs placed no order at all. Three separate faults, none
+    of which any test could see, because every agent test — unit *and* live —
+    builds a `Marketplace()`. Nothing exercised the agent against the Swiggy
+    adapter, which is the pairing the demo actually runs on."""
+
+    def test_the_agent_can_read_a_swiggy_shaped_offer(self):
+        """**502, and no order.** `_search_catalog` was written against the mock,
+        whose `Offer` nests a `CartItem`. Swiggy's is flat, so the first search
+        on a live session raised `AttributeError` out of the route as a bare
+        `502 Bad Gateway` — no cart, no verdict, no reason given."""
+        from bounded_mandate.commerce import offer_parts
+        from bounded_mandate.swiggy import Offer
+
+        flat = Offer(
+            sku_id="s1",
+            spin_id="p1",
+            name="Amul Taaza Toned Milk",
+            price_paise=7_700,
+            category="groceries",
+            in_stock=True,
+        )
+        seller, item = offer_parts(flat)
+
+        assert seller == "instamart"
+        assert item.name == "Amul Taaza Toned Milk"
+        assert item.price_paise == 7_700
+
+    def test_an_address_id_means_the_same_thing_on_both_endpoints(self):
+        """**Every live order escalated.** `get_addresses` answers
+        `<id>__<token>` and `get_cart` answers `<id>`, so the policy could never
+        hold the string the cart reports — `delivery.unknown_address` fired on
+        every order regardless of what was pinned, and pinning the value the
+        auth script printed would not have helped."""
+        from bounded_mandate.swiggy import canonical_address
+
+        book = "d86lmbjedmej3uqmebcg__AbJwFASXq1QqZQZjnzcvt4"
+        cart = "d86lmbjedmej3uqmebcg"
+
+        assert canonical_address(book) == canonical_address(cart) == cart
+        # Idempotent, because both sides are canonicalised and one is already bare.
+        assert canonical_address(canonical_address(book)) == cart
+
+    def test_a_plural_still_finds_the_product(self):
+        """**"not stocked" for produce the shop plainly stocks.** The list says
+        "Bananas 1kg" and Instamart sells "Robusta Banana (Kela)"; matching on
+        exact word equality, those shared nothing. Every such line cost a search
+        and a retry, and sometimes ended the run with a question."""
+        from bounded_mandate.swiggy import _words
+
+        assert _words("Bananas 1kg") & _words("Robusta Banana (Kela) 4 Pieces")
+        assert _words("Onions 2kg") & _words("Onion (Pyaaz) 1 kg")
+        assert _words("Eggs (12)") & _words("Keggs Cage free Golden 12 eggs")
+
+    def test_folding_stops_at_plurals_and_does_not_become_a_stemmer(self):
+        """The guard on the guard. Over-folding buys a wrong match, which is
+        worse than the missing one it was added to fix."""
+        from bounded_mandate.swiggy import _fold
+
+        assert _fold("bananas") == "banana"
+        assert _fold("gas") == "gas", "too short to be a plural"
+        assert _fold("grass") == "grass", "-ss is not a plural"
+        assert _fold("milk") == "milk"

@@ -77,6 +77,23 @@ ALLOWED_TOOLS: tuple[str, ...] = (
 #: varies by address, so it is pinned rather than discovered on camera.
 ADDRESS_ID = os.environ.get("SWIGGY_ADDRESS_ID", "")
 
+
+def canonical_address(address_id: str) -> str:
+    """The half of a Swiggy address id that both endpoints agree on.
+
+    `get_addresses` answers `<id>__<token>`; `get_cart` answers `<id>` alone.
+    They are the same address and they are not the same string, so comparing
+    them for identity is false for *every* address on the account — which made
+    `delivery.unknown_address` fire on every live order regardless of what was
+    pinned, and no live order could be placed at all.
+
+    The prefix is what both agree on, so the prefix is the identity. The full
+    string is still what Swiggy wants when *setting* an address, so the adapter
+    keeps that privately and hands out this.
+    """
+    return address_id.split("__", 1)[0]
+
+
 #: What the MCP layer looks like from in here: a tool name and its parameters.
 CallTool = Callable[..., dict]
 
@@ -280,10 +297,30 @@ _NOISE = frozenset(
 )
 
 
+def _fold(word: str) -> str:
+    """`bananas` and `banana` are the same word for matching purposes.
+
+    A list says "Bananas 1kg" and Instamart sells "Robusta Banana (Kela)"; a
+    list says "Onions 2kg" and the shop sells "Onion (Pyaaz) 1 kg". With exact
+    word equality those share nothing, `_best_match` returned None, and
+    `create_cart` answered "not stocked" for produce the shop plainly stocks —
+    which cost the agent a search and a retry per line and sometimes ended the
+    run with a question instead of an order.
+
+    Deliberately only a trailing `s`, and only on words long enough for it to be
+    a plural rather than the word: `gas` and `grass` are left alone. This is not
+    a stemmer and should not grow into one — the failure it guards is a missing
+    match, and the cost of over-folding is a wrong one.
+    """
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
 def _words(text: str) -> frozenset[str]:
     """The distinctive words in a product name or a request."""
     return frozenset(
-        word
+        _fold(word)
         for raw in re.split(r"[^a-z0-9]+", text.casefold())
         if (word := raw.strip("0123456789")) and word not in _NOISE
     )
@@ -374,6 +411,8 @@ class SwiggyAdapter:
         #: Where the product that ended up in the cart is not the product that
         #: was asked for.
         self._substituted: tuple[tuple[str, str], ...] = ()
+        #: canonical id -> the raw `<id>__<token>` Swiggy wants when setting one.
+        self._full_ids: dict[str, str] = {}
 
     # --- agent-facing -------------------------------------------------------
 
@@ -383,11 +422,22 @@ class SwiggyAdapter:
         `addressLine` is the composite Swiggy shows a person; the cart reports
         only the street part. Both are presentation, which is why `address_id`
         is what reaches the policy and these two only reach the card.
+
+        The id is canonicalised — see `canonical_address`. What the policy holds
+        has to be the same string the cart reports, and the raw form is not.
         """
         rows = self._invoke("get_addresses").get("addresses") or []
+        # Canonical -> raw, so `use_address` can send Swiggy the form it wants.
+        self._full_ids = {
+            canonical_address(str(row.get("id") or row.get("addressId") or "")): str(
+                row.get("id") or row.get("addressId") or ""
+            )
+            for row in rows
+            if row.get("id") or row.get("addressId")
+        }
         return [
             Address(
-                address_id=str(row.get("id") or row.get("addressId") or ""),
+                address_id=canonical_address(str(row.get("id") or row.get("addressId") or "")),
                 label=str(row.get("addressTag") or row.get("addressCategory") or "Address"),
                 line=str(row.get("addressLine") or ""),
             )
@@ -396,7 +446,16 @@ class SwiggyAdapter:
         ]
 
     def use_address(self, address_id: str) -> None:
-        """Where the next cart ships. A user decision, pushed down to the session."""
+        """Where the next cart ships. A user decision, pushed down to the session.
+
+        Takes the canonical id the app and the policy use, and stores the raw
+        one Swiggy wants — resolving through the address book when it has not
+        been read yet.
+        """
+        if address_id not in self._full_ids.values():
+            if canonical_address(address_id) not in self._full_ids:
+                self.addresses()  # populates the map
+            address_id = self._full_ids.get(canonical_address(address_id), address_id)
         self._address_id = address_id
 
     def address_id(self) -> str:
@@ -681,7 +740,8 @@ class SwiggyAdapter:
             cart_id=cart_id_for(items, total),
             merchant=MERCHANT_NAME,
             items=tuple(items),
-            delivery_address=str(address or ""),
+            # Canonical, so it can be compared with what the policy holds.
+            delivery_address=canonical_address(str(address or "")),
         )
         return CartReport(
             cart=cart,

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import os
 
-from .merchant import Marketplace
+from .merchant import MERCHANT_NAME, Marketplace
 from .swiggy import SwiggyAdapter
 from .swiggy_mcp import SwiggyMCP
 
@@ -69,3 +69,22 @@ def build():
         return SwiggyAdapter(SwiggyMCP())
     known = "mock, swiggy"
     raise RuntimeError(f"no such commerce backend: {BACKEND}. Known: {known}")
+
+
+def offer_parts(offer) -> tuple[str, object]:
+    """Both backends answer `search`; they answer it with different shapes.
+
+    The mock pairs a seller with a catalog item because it has three sellers.
+    Swiggy is one shop, so its offer *is* the product — flat, with `name` and
+    `price_paise` on the offer itself.
+
+    It lives here, in the module that already owns which backend is which, so
+    that every reader of a search result normalises the same way. It did not,
+    and the agent paid for it: `_search_catalog` was written against the mock
+    alone and reached for `offer.item.name`, so the first search on a live
+    session raised `AttributeError` out of the route as a 502 and no order could
+    be placed at all.
+    """
+    if hasattr(offer, "item"):
+        return offer.merchant, offer.item
+    return MERCHANT_NAME, offer

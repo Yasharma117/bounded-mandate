@@ -38,6 +38,7 @@ from .basket import ListKind, ShoppingList, seed_addresses, seed_lists
 from .categories import FEES, KNOWN, with_fees
 from .commerce import build as build_commerce
 from .commerce import is_live
+from .commerce import offer_parts as _offer_parts
 from .compiler import GrantRefused, compile_mandate, grant_for_cart
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
 from .ledger import ChainBroken, Ledger
@@ -1098,19 +1099,6 @@ def _annotate(offers: list[dict]) -> list[dict]:
         }
         for offer in offers
     ]
-
-
-def _offer_parts(offer) -> tuple[str, object]:
-    """Both backends answer `search`; they answer it with different shapes.
-
-    The mock pairs a seller with a catalog item because it has three sellers.
-    Swiggy is one shop, so its offer *is* the product. Normalised here rather
-    than branching on `is_live()` — the two objects already agree on the four
-    attribute names that matter, and the seam is a shape difference, not a mode.
-    """
-    if hasattr(offer, "item"):
-        return offer.merchant, offer.item
-    return MERCHANT_NAME, offer
 
 
 def _offer_rows(query: str) -> list[dict]:
