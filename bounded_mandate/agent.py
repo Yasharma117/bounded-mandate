@@ -21,7 +21,7 @@ from .basket import ShoppingList
 from .commerce import offer_parts
 from .engine import Decision, Policy, Proposal, decide
 from .ledger import Ledger
-from .llm import MODEL, default_client
+from .llm import MODEL, call_model, default_client
 from .merchant import MERCHANT_NAME, Marketplace, UnknownMerchant
 
 
@@ -571,7 +571,8 @@ class BuyerAgent:
         messages.append({"role": "user", "content": instruction})
 
         for _ in range(max_turns):
-            completion = self.client.chat.completions.create(
+            completion = call_model(
+                self.client,
                 model=self.model,
                 messages=messages,
                 tools=TOOLS,

@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bounded_mandate import Cart, CartItem, Ledger, MandateStatus, Policy, web
-from bounded_mandate.basket import seed_lists
+from bounded_mandate.basket import seed_addresses, seed_lists
 from bounded_mandate.categories import with_fees
 from bounded_mandate.merchant import Marketplace, MockMerchant
 from bounded_mandate.razorpay_gateway import GatewayError
@@ -108,7 +108,13 @@ class FakeGateway:
 #: dict. A grant is an ordinary Policy in `web.POLICIES`, so without this the
 #: mandates one test mints are still standing in the next.
 SEED_POLICIES = dict(web.POLICIES)
-SEED_DELIVERY = web.DELIVERY_ID
+
+#: The seeded address, *not* whatever `delivery.json` happened to hold when the
+#: suite imported. Persisting the choice made the module read a file in the
+#: working directory at import, so a live run left `office` on disk and 27 tests
+#: that had never touched an address started failing — the fixture below pins
+#: both the value and the file it would be written to.
+SEED_DELIVERY = seed_addresses()[0].address_id
 
 
 @pytest.fixture
@@ -124,6 +130,9 @@ def client(monkeypatch, tmp_path):
     # rewrites the policy — so a test that moves it would otherwise move it for
     # every test after.
     monkeypatch.setattr(web, "DELIVERY_ID", SEED_DELIVERY)
+    # And the file it persists to, so choosing an address in a test cannot
+    # write into the repo and be read back by the next run of the suite.
+    monkeypatch.setattr(web, "DELIVERY_PATH", tmp_path / "delivery.json")
     c = TestClient(web.app)
     c.gateway = gw
     return c
