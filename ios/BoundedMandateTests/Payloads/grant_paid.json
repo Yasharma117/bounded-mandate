@@ -1,0 +1,59 @@
+{
+  "grant_id": "grant_5XP5GUxd-auVlgoT",
+  "per_txn_max_paise": 135700,
+  "merchants": [
+    "instamart"
+  ],
+  "categories": [
+    "electronics",
+    "fees",
+    "groceries"
+  ],
+  "delivery_address": "d86lmbjedmej3uqmebcg",
+  "every_days": 1,
+  "orders_per_window": 1,
+  "cart_id": "swiggy_ec3c305d0cdb4eed",
+  "expires_at": "2026-09-02T14:39:35.715289+00:00",
+  "state": "paid",
+  "merchant": "instamart",
+  "amount_paise": 135700,
+  "order_id": null,
+  "key_id": null,
+  "prefill": {
+    "name": "Bounded Mandate Demo",
+    "email": "demo@bounded-mandate.test",
+    "contact": "9999999999"
+  },
+  "customer_id": "cust_TTLps2hMvMxsvB",
+  "saved_card": null,
+  "payment_id": "pay_TestSuccess001",
+  "items": [
+    {
+      "name": "Aashirvaad Atta High Protein 1 kg",
+      "price_paise": 5000,
+      "category": "groceries",
+      "url": "/m/instamart/p/Aashirvaad%20Atta%20High%20Protein%201%20kg",
+      "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/ciw/2026/6/12/367173e3-9bd7-41d9-be62-41d934f20ae1_278654_1_MN_07eba0b8-fb89-4a92-87f8-b5ddbe33e59d.png",
+      "off_scope": false,
+      "unclassified": false
+    },
+    {
+      "name": "GOBOULT Drift BT Calling HD Display, 140+ Watchfaces,Complete Health Monitoring Smartwatch (Black Strap) 1 Piece",
+      "price_paise": 129900,
+      "category": "electronics",
+      "url": "/m/instamart/p/GOBOULT%20Drift%20BT%20Calling%20HD%20Display%2C%20140%2B%20Watchfaces%2CComplete%20Health%20Monitoring%20Smartwatch%20%28Black%20Strap%29%201%20Piece",
+      "image_url": "https://media-assets.swiggy.com/swiggy/image/upload/w_160,h_160,c_fit/NI_CATALOG/IMAGES/CIW/2025/9/15/73fe5544-8985-4b3c-931f-639a38e8a2dd_378913_1.png",
+      "off_scope": false,
+      "unclassified": false
+    },
+    {
+      "name": "Handling Fee",
+      "price_paise": 800,
+      "category": "fees",
+      "url": "/m/instamart/p/Handling%20Fee",
+      "image_url": "",
+      "off_scope": false,
+      "unclassified": false
+    }
+  ]
+}

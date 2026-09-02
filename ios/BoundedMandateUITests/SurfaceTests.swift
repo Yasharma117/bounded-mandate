@@ -222,4 +222,66 @@ final class SurfaceTests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground)
         capture("after-foreground")
     }
+
+    /// Drives to a live one-time approval and leaves it on screen.
+    ///
+    /// Not an assertion about payment — that needs a real card number, which no
+    /// test has. It gets the app into the one state the receipt work is about,
+    /// so the settlement can be signed out-of-band and the card checked.
+    func testApprovingABasketLeavesACheckoutOnScreen() throws {
+        waitForHome()
+        // The command bar, not "Talk to it" — that opens the thread in voice
+        // mode, where there is no field to type into.
+        let bar = app.buttons["Ask Warden anything…"]
+        guard bar.waitForExistence(timeout: 15) else {
+            throw XCTSkip("no command bar on the home screen")
+        }
+        bar.tap()
+        XCTAssertTrue(app.buttons["Back"].waitForExistence(timeout: 15), "thread did not open")
+
+        // Typed rather than tapping a suggestion chip: the chips sit in a
+        // horizontal scroller and the one that provokes a refusal is off the
+        // right edge, so a tap on it finds nothing.
+        let field = app.textFields.firstMatch
+        guard field.waitForExistence(timeout: 10) else {
+            print("TREE>>>\n\(app.debugDescription)\n<<<TREE")
+            throw XCTSkip("no input field on the thread")
+        }
+        field.tap()
+        field.typeText("Order my usual groceries, and add the Bluetooth earbuds and a phone case.\n")
+
+        // The agent runs against a live model and a live shop; this is the slow
+        // part of the whole suite and there is no honest way to shorten it.
+        let approve = app.buttons.containing(
+            NSPredicate(format: "label CONTAINS[c] 'Approve just this basket'")
+        ).firstMatch
+        guard approve.waitForExistence(timeout: 120) else {
+            throw XCTSkip("no refusal came back to approve — the agent chose differently")
+        }
+        // Hittability, not existence. The approve button sits low in a scroll
+        // view under the command bar, and whether it is reachable depends on
+        // how tall the refusal above it came out — which depends on what the
+        // agent said. A tap on an unhittable button fails the run for a reason
+        // that has nothing to do with what is being tested.
+        guard approve.isHittable else {
+            throw XCTSkip("the approve button is off-screen behind this refusal")
+        }
+        approve.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Open the checkout"].waitForExistence(timeout: 30),
+            "approving minted no checkout"
+        )
+        capture("approval-before-payment")
+
+        // Hold the app on screen. XCUITest terminates it the moment the method
+        // returns, and the thing worth watching — the card noticing a payment
+        // it did not make — happens after that. `BM_HOLD` is set only when a
+        // person is driving this by hand.
+        if ProcessInfo.processInfo.environment["BM_HOLD"] != nil {
+            print("HOLDING: approval on screen, grant is live")
+            sleep(100)
+            capture("after-the-hold")
+        }
+    }
 }

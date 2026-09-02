@@ -139,7 +139,20 @@ def test_paying_spends_the_grant(client):
 
     assert settled.status_code == 200
     assert web.POLICIES[grant_id].status is MandateStatus.REVOKED
-    assert client.get(f"/api/grant/{grant_id}").json()["state"] == "paid"
+
+    # Everything the app's receipt card renders. The mint response describes
+    # bounds and cannot describe a payment that has not happened, so this route
+    # is the only place a paid approval can be read back — and a card that
+    # showed "Paid" with no amount and no reference would be worth less than
+    # the stale one it replaced.
+    paid = client.get(f"/api/grant/{grant_id}").json()
+    assert paid["state"] == "paid"
+    assert paid["payment_id"] == "pay_1"
+    assert paid["amount_paise"] > 0
+    assert paid["merchant"]
+    # And the checkout closes behind it: a spent approval hands out no order id,
+    # so an old tab cannot reopen one.
+    assert paid["order_id"] is None
 
 
 def test_a_spent_grant_authorises_nothing_further(client):

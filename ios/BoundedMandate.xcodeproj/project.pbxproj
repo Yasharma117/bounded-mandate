@@ -49,6 +49,7 @@
 		B3CCBE7DE4AF8D06C7DF3D2D /* Surfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2FE80D8D802D5B02E2DF3C0 /* Surfaces.swift */; };
 		B80B197A1F70F4625A02EC9D /* home_ruled.json in Resources */ = {isa = PBXBuildFile; fileRef = 4AE916CDA0C1513FDF5A4A2C /* home_ruled.json */; };
 		B89B81EFC730E92C5C6317EA /* turn_deny.json in Resources */ = {isa = PBXBuildFile; fileRef = FBE069DC68F919F6052214CE /* turn_deny.json */; };
+		B95039D4789807D646A239B5 /* grant_paid.json in Resources */ = {isa = PBXBuildFile; fileRef = C1E4561396BAE03400CEAA16 /* grant_paid.json */; };
 		B996BA93AC5014410769CEA1 /* grant_checkout.json in Resources */ = {isa = PBXBuildFile; fileRef = 607154604E21A84A7DDFA83C /* grant_checkout.json */; };
 		C66C9667FC1FB77471A33FD3 /* home_halted.json in Resources */ = {isa = PBXBuildFile; fileRef = 6FF36AF27E6CB981AD66A64A /* home_halted.json */; };
 		C9175BE14C157761031F15B0 /* turn_prices.json in Resources */ = {isa = PBXBuildFile; fileRef = 4B4772911BE45B54FA37B34F /* turn_prices.json */; };
@@ -137,6 +138,7 @@
 		B677F47A693CD3BE0ECAC7C3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BCDF39B1D222BAA0CA0D7F2B /* LedgerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerSheet.swift; sourceTree = "<group>"; };
 		BD126AE709CB4010EFDE7B52 /* BoundedMandate.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BoundedMandate.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C1E4561396BAE03400CEAA16 /* grant_paid.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = grant_paid.json; sourceTree = "<group>"; };
 		C505FE655A597E914113A48C /* Bubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bubble.swift; sourceTree = "<group>"; };
 		C748AAD1C1085254E1F426F7 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		C9736444AF6DBCB412CF4E12 /* turn_escalate.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = turn_escalate.json; sourceTree = "<group>"; };
@@ -234,6 +236,7 @@
 				96063580324C426C48291527 /* addresses.json */,
 				FFC7C64DB646CF41394D92D3 /* decision_live.json */,
 				607154604E21A84A7DDFA83C /* grant_checkout.json */,
+				C1E4561396BAE03400CEAA16 /* grant_paid.json */,
 				9FC75673669DB63D1D565AD6 /* grant.json */,
 				207DF571292C7E04D37A3559 /* home_at_rest.json */,
 				ECD4E0E4BD022186DCF737C0 /* home_clarify.json */,
@@ -410,6 +413,7 @@
 				A076D5C01A07E48990CC13E9 /* decision_live.json in Resources */,
 				1ECD29654D72BE57A4CBD93C /* grant.json in Resources */,
 				B996BA93AC5014410769CEA1 /* grant_checkout.json in Resources */,
+				B95039D4789807D646A239B5 /* grant_paid.json in Resources */,
 				9E4163CA007B7EC3036FDF25 /* home_at_rest.json in Resources */,
 				431BB4DA3A4C1426BECA5AF1 /* home_clarify.json in Resources */,
 				D05291B2448BC8E244EBCAC5 /* home_escalated.json in Resources */,

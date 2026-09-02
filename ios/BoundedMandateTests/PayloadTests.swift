@@ -697,3 +697,34 @@ struct CardCopyTests {
 }
 
 private final class CopyBundleMarker {}
+
+// MARK: - what the approval became
+
+extension PayloadTests {
+    /// Captured from `GET /api/grant/{id}` after a signed settlement callback.
+    ///
+    /// The mint response describes bounds and cannot describe a payment that
+    /// has not happened yet, so these three fields exist only here — and the
+    /// card that shows a receipt reads all three.
+    @Test func aPaidGrantCarriesWhatTheReceiptNeeds() throws {
+        let grant = try decode(Grant.self, "grant_paid")
+
+        #expect(grant.state == "paid")
+        #expect(grant.paid)
+        #expect(grant.paymentID == "pay_TestSuccess001")
+        #expect(grant.amountPaise == 135_700)
+        #expect(grant.merchant == "instamart")
+    }
+
+    /// The same model decodes the mint response, where none of the three are
+    /// present. Optional rather than defaulted, so a card that has not asked
+    /// the engine can tell "not paid" from "not asked".
+    @Test func anUnpaidGrantSaysSoByOmission() throws {
+        let grant = try decode(GrantResponse.self, "grant").grant
+
+        #expect(grant.state == "ready")
+        #expect(!grant.paid)
+        #expect(grant.paymentID == nil)
+        #expect(grant.amountPaise == nil)
+    }
+}

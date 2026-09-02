@@ -48,6 +48,17 @@ enum Engine {
         try await post("/api/mandate/one-time", body: ["cart_id": cartID])
     }
 
+    /// What became of an approval — `ready`, `paid`, `expired`, `stale`.
+    ///
+    /// The card that minted the grant cannot know: the payment happens in
+    /// Safari, and the engine is the only party a signed callback reaches. So
+    /// the answer is asked for rather than assumed, and a `warden://paid` link
+    /// only prompts the question.
+    static func readGrant(_ grantID: String) async throws -> Grant {
+        let encoded = grantID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+        return try await send("/api/grant/\(encoded ?? grantID)", method: "GET")
+    }
+
     /// The checkout the server minted, as an absolute URL for Safari.
     static func url(forPath path: String) -> URL? {
         URL(string: baseURL.absoluteString + path)

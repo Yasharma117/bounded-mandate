@@ -11,6 +11,10 @@ struct DecisionCard: View {
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
+    /// Set when the checkout redirected back through `warden://paid`. A prompt
+    /// to go and ask the engine, never the answer itself.
+    @Environment(\.paidGrantID) private var paidGrantID
     let decision: Decision
 
     /// What the user approved, once they have. Held here rather than in the
@@ -19,6 +23,12 @@ struct DecisionCard: View {
     @State private var granted: GrantResponse?
     @State private var granting = false
     @State private var refusal: String?
+
+    /// What the engine last said about the grant. The mint response describes
+    /// bounds and cannot describe a payment that has not happened, so this is
+    /// the only thing that ever reports one.
+    @State private var settled: Grant?
+    @State private var showingLedger = false
 
     /// The cart opens by itself when something in it is the reason for the
     /// verdict — that is the moment the reader needs to see the lines, and
@@ -29,10 +39,23 @@ struct DecisionCard: View {
 
     private var tint: Color { theme.color(for: decision.verdict) }
 
+    /// The payment, if the engine has confirmed one for this card's grant.
+    private var receipt: Grant? {
+        guard let settled, settled.paid, settled.grantID == granted?.grant.grantID else {
+            return nil
+        }
+        return settled
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             verdictCard
-            if let granted {
+            if let receipt {
+                // Replaces the approval rather than joining it. A countdown to
+                // an expiry, beside a payment that already happened, is the
+                // same contradiction the stale card had — in a new place.
+                paidCard(receipt).arrives(reduceMotion)
+            } else if let granted {
                 MandateCard(
                     bounds: granted.grant.bounds,
                     expiresIn: granted.grant.expiresIn,
@@ -41,6 +64,32 @@ struct DecisionCard: View {
                 .arrives(reduceMotion)
                 if let checkout { reopen(checkout) }
             }
+        }
+        .sheet(isPresented: $showingLedger) { LedgerSheet() }
+        // Two ways in, and both only ask a question.
+        //
+        // The redirect is the fast one: Safari hands back the instant the
+        // payment clears. Coming to the foreground is the one that works when
+        // it does not — the scheme missing, the tab left open, the user
+        // switching back by hand — and the app is backgrounded for the whole
+        // payment either way, so `.active` is exactly when the answer changed.
+        .onChange(of: paidGrantID) { _, _ in Task { await recheck() } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await recheck() } }
+        }
+    }
+
+    /// Ask the engine what became of the approval.
+    ///
+    /// Nothing here trusts the URL that woke it: a `warden://paid` link can be
+    /// opened by anything, and only the engine has seen a signed callback. A
+    /// failure is silent on purpose — the card is already showing something
+    /// true, and "could not re-check" is noise beside it.
+    private func recheck() async {
+        guard let id = granted?.grant.grantID, receipt == nil else { return }
+        guard let fresh = try? await Engine.readGrant(id) else { return }
+        withAnimation(Motion.respectful(Motion.enter(), reduced: reduceMotion)) {
+            settled = fresh
         }
     }
 
@@ -99,7 +148,16 @@ struct DecisionCard: View {
                     // Words, not codes. The reference is worth showing because
                     // it is something the user could quote back to support; the
                     // reason string is not.
-                    DetailRow(label: "Outcome", value: decision.settlement, color: tint)
+                    // `decision.settlement` was captured when the proposal was
+                    // ruled on and says "Nothing was charged" forever. That was
+                    // true then and is not true now. The ledger entry behind it
+                    // is untouched — what changes is which of two true things
+                    // this row shows.
+                    DetailRow(
+                        label: "Outcome",
+                        value: receipt == nil ? decision.settlement : "Paid",
+                        color: receipt == nil ? tint : theme.primary
+                    )
                     if let reference = decision.paymentID ?? decision.orderID {
                         DetailRow(label: "Reference", value: reference, mono: true)
                     }
@@ -153,6 +211,66 @@ struct DecisionCard: View {
                     .padding(.bottom, 12)
             }
         }
+    }
+
+    /// What the approval turned into.
+    ///
+    /// Says the same things the home card's own `paid` state says, in the same
+    /// order, because they are describing one event and a reader who sees both
+    /// should not have to reconcile them.
+    private func paidCard(_ grant: Grant) -> some View {
+        Card(tint: theme.primary) {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(theme.primary)
+                        Eyebrow(text: "Paid", color: theme.primary)
+                    }
+                    Text(paidHeadline(grant))
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(theme.textNormal)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let reference = grant.paymentID {
+                        Text(reference)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(theme.textMuted)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(18)
+
+                Divider().overlay(theme.borderSubtle)
+
+                Button { showingLedger = true } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "checkmark.seal")
+                        Text("Verify the chain")
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(theme.primary)
+                    .padding(.horizontal, 18)
+                    .frame(minHeight: 48)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.pressable)
+            }
+        }
+    }
+
+    /// "₹272 at instamart. It is on its way."
+    ///
+    /// The amount comes from the grant the engine minted off the cart it
+    /// fetched itself, so it is the figure that was authorised rather than one
+    /// the client added up.
+    private func paidHeadline(_ grant: Grant) -> String {
+        let amount = grant.amountPaise.map(rupees) ?? "Your order"
+        let where_ = grant.merchant.map { " at \($0)" } ?? ""
+        return "\(amount)\(where_). It is on its way."
     }
 
     private func reopen(_ url: URL) -> some View {

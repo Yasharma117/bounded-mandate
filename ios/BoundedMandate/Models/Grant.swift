@@ -22,12 +22,26 @@ struct Grant: Decodable, Hashable, Sendable, Identifiable {
     /// `ready`, `paid`, `expired`, `stale`, or `refused`.
     let state: String
 
+    //: The three below come only from `GET /api/grant/{id}`. Minting a grant
+    //: answers with bounds alone — there is no payment to describe yet — so
+    //: they are optional rather than defaulted, and a card that has not asked
+    //: the engine can tell "not paid" from "not asked".
+    let paymentID: String?
+    let amountPaise: Int?
+    let merchant: String?
+
     var id: String { grantID }
+
+    /// Money moved, and the engine says so — not the checkout, and not a URL
+    /// somebody opened.
+    var paid: Bool { state == "paid" }
 
     enum CodingKeys: String, CodingKey {
         case grantID = "grant_id"
         case perTxnMaxPaise = "per_txn_max_paise"
-        case merchants, categories, state
+        case merchants, categories, state, merchant
+        case paymentID = "payment_id"
+        case amountPaise = "amount_paise"
         case deliveryAddress = "delivery_address"
         case everyDays = "every_days"
         case ordersPerWindow = "orders_per_window"

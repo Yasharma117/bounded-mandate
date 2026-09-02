@@ -156,6 +156,18 @@ $("pay").onclick = () => {
       if (!res.ok) { msg("Could not verify: " + (out.detail || res.status), "err"); $("pay").disabled = false; return; }
       msg(`Paid — ${out.payment_id}. Signature verified, approval spent.`, "ok");
       $("clock").textContent = "";
+      // Hand control back to the app. Without this it sits on a stale
+      // "Open the checkout" card counting down fifteen minutes, for a basket
+      // that has already been paid for — the screen describing the moment
+      // before the one you are in.
+      //
+      // A beat first, so the confirmation above is readable rather than a
+      // flash, and the message stays on the page: if the scheme is not
+      // installed nothing happens here at all, and the app picks the payment up
+      // when it next comes to the foreground.
+      setTimeout(() => {
+        window.location = `warden://paid?grant=${encodeURIComponent(grantID)}`;
+      }, 1200);
     },
     modal: { ondismiss: () => { msg("Cancelled — nothing was charged.", "err"); $("pay").disabled = false; } },
   });

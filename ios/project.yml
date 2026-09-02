@@ -31,6 +31,12 @@ targets:
           rules and orders instead of typing them.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # So the checkout can hand control back. Razorpay runs in Safari, and
+        # without a way home the app sits on a stale "Open the checkout" card
+        # counting down while the money has already moved.
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.yasharma.boundedmandate
+            CFBundleURLSchemes: [warden]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.yasharma.boundedmandate
