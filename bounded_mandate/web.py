@@ -36,8 +36,8 @@ from pydantic import BaseModel, Field
 from .agent import ADVERSARIAL_SYSTEM, BuyerAgent
 from .basket import ListKind, ShoppingList, seed_addresses, seed_lists
 from .categories import FEES, KNOWN, with_fees
+from .commerce import BACKEND, is_live
 from .commerce import build as build_commerce
-from .commerce import is_live
 from .commerce import offer_parts as _offer_parts
 from .compiler import GrantRefused, compile_mandate, grant_for_cart
 from .engine import MandateStatus, Policy, Proposal, Verdict, decide
@@ -120,7 +120,47 @@ STATIC = Path(__file__).parent / "static"
 #: On the live path it starts at the pinned `SWIGGY_ADDRESS_ID`; on the mock, at
 #: the first seeded address. Either way the *user* changes it, and there is no
 #: agent tool that reaches the route which does.
+#: Where the chosen delivery address is kept between runs.
+#:
+#: It was a module global and nothing else, so every restart silently reset it
+#: to `SWIGGY_ADDRESS_ID` — you chose an address, the choice took, and the next
+#: time the engine came up it was somewhere else, with nothing on screen to say
+#: it had moved. That is the same fault the grants file exists to fix, and it
+#: matters more here: an address is authority, and authority that quietly
+#: reverts to a default is worse than authority that fails loudly.
+DELIVERY_PATH = Path(os.environ.get("BM_DELIVERY", "delivery.json"))
+
+
+def save_delivery() -> None:
+    """Remember where the account holder said to deliver."""
+    DELIVERY_PATH.write_text(
+        json.dumps({"delivery_id": DELIVERY_ID, "backend": BACKEND}), encoding="utf-8"
+    )
+
+
+def load_delivery() -> str | None:
+    """The remembered address, if it still belongs to this backend.
+
+    Mock ids and Swiggy ids are different namespaces, so a file written by one
+    must not be honoured by the other — restored across a backend switch it
+    would pin an address the shop has never heard of, and every order would
+    escalate on a doorstep nobody could find.
+    """
+    if not DELIVERY_PATH.exists():
+        return None
+    try:
+        saved = json.loads(DELIVERY_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if saved.get("backend") != BACKEND:
+        return None
+    return saved.get("delivery_id") or None
+
+
 DELIVERY_ID: str = SWIGGY_ADDRESS_ID if is_live() else seed_addresses()[0].address_id
+# A remembered choice outranks the environment default: the env var is where to
+# start, not where the account holder decided to send things.
+DELIVERY_ID = load_delivery() or DELIVERY_ID
 
 # One process-wide engine context. A real deployment would key these per user;
 # the demo has one mandate and one merchant, so a module-level store is honest
@@ -1302,6 +1342,7 @@ def choose_address(body: AddressChoice) -> dict:
         raise HTTPException(404, "that address is not on your account")
 
     DELIVERY_ID = body.address_id
+    save_delivery()
     # Swiggy holds the delivery address on the session, so the choice has to
     # reach the merchant too — otherwise the cart ships somewhere the policy
     # then refuses, and the refusal names the wrong thing.

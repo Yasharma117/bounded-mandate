@@ -1094,3 +1094,53 @@ def test_delivery_cannot_be_set_through_the_rule_route(client):
     )
 
     assert web.POLICIES["mdt_demo"].delivery_addresses == before
+
+
+# --- where it goes, and whether that survives -------------------------------
+
+
+def test_a_chosen_address_outlives_a_restart(client, tmp_path, monkeypatch):
+    """**It did not, and every restart silently undid the choice.**
+
+    `DELIVERY_ID` was a module global seeded from `SWIGGY_ADDRESS_ID`, so the
+    account holder chose an address, the choice took, and the next boot put it
+    back to the environment default with nothing on screen to say it had moved.
+    An address is authority; authority that quietly reverts to a default is
+    worse than authority that fails loudly.
+    """
+    monkeypatch.setattr(web, "DELIVERY_PATH", tmp_path / "delivery.json")
+    monkeypatch.setattr(web, "DELIVERY_ID", "home")
+
+    second = next(a["address_id"] for a in web._address_rows() if a["address_id"] != "home")
+    assert client.put("/api/address", json={"address_id": second}).status_code == 200
+
+    # What a fresh boot would read.
+    assert web.load_delivery() == second
+
+
+def test_a_remembered_address_is_ignored_across_a_backend_switch(tmp_path, monkeypatch):
+    """Mock ids and Swiggy ids are different namespaces. Restored across a
+    switch, a remembered id pins a doorstep the shop has never heard of and
+    every order escalates on an address nobody can find."""
+    monkeypatch.setattr(web, "DELIVERY_PATH", tmp_path / "delivery.json")
+    (tmp_path / "delivery.json").write_text(
+        '{"delivery_id": "d86lmbjedmej3uqmebcg", "backend": "swiggy"}'
+    )
+
+    monkeypatch.setattr(web, "BACKEND", "mock")
+    assert web.load_delivery() is None, "a swiggy address was restored onto the mock"
+
+    monkeypatch.setattr(web, "BACKEND", "swiggy")
+    assert web.load_delivery() == "d86lmbjedmej3uqmebcg"
+
+
+def test_a_missing_or_corrupt_delivery_file_is_not_fatal(tmp_path, monkeypatch):
+    """It is a convenience, not a source of truth — a bad file falls back to the
+    environment default rather than taking the engine down on boot."""
+    monkeypatch.setattr(web, "DELIVERY_PATH", tmp_path / "nope.json")
+    assert web.load_delivery() is None
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json")
+    monkeypatch.setattr(web, "DELIVERY_PATH", bad)
+    assert web.load_delivery() is None

@@ -129,4 +129,48 @@ final class SurfaceTests: XCTestCase {
             )
         }
     }
+
+    func testChoosingADeliveryAddressSticks() throws {
+        waitForHome()
+        app.buttons["Delivery address"].tap()
+        XCTAssertTrue(
+            app.staticTexts["Office"].waitForExistence(timeout: 15),
+            "the address sheet did not open"
+        )
+        capture("address-before")
+
+        // Tap the row that is NOT currently chosen. Tapping the chosen one is a
+        // deliberate no-op (`guard !address.selected`), so a test that did that
+        // would pass while proving nothing.
+        let office = app.buttons.containing(
+            NSPredicate(format: "label BEGINSWITH 'Office'")
+        ).firstMatch
+        let guesthouse = app.buttons.containing(
+            NSPredicate(format: "label BEGINSWITH 'Guesthouse'")
+        ).firstMatch
+        guard office.exists, guesthouse.exists else {
+            throw XCTSkip("this account no longer has the two addresses this test names")
+        }
+        // Two taps, so the test proves a real transition whatever it started
+        // on. Tapping the already-chosen row is a deliberate no-op, and a
+        // one-tap version passes without moving anything when the run happens
+        // to begin on the address it is about to choose.
+        guesthouse.tap()
+        sleep(2)
+        office.tap()
+        sleep(3)
+        capture("address-after")
+
+        // The claim the user actually makes: choose it, close, and the home card
+        // says so. Everything between is plumbing.
+        app.buttons["Done"].tap()
+        let summary = app.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS[c] 'to Office'")
+        ).firstMatch
+        XCTAssertTrue(
+            summary.waitForExistence(timeout: 15),
+            "chose Office, and the home card does not say it delivers there"
+        )
+        capture("home-after-address")
+    }
 }
