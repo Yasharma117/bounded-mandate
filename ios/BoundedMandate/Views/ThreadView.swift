@@ -74,6 +74,22 @@ final class Thread {
     func append(_ message: Message) {
         messages.append(message)
     }
+
+    /// Something the app did, said back into the conversation.
+    ///
+    /// Approving a basket and paying for it happen on a card, not in the
+    /// thread — so for as long as this did not exist, the conversation had no
+    /// record of either. The agent was then handed a history whose last word
+    /// was its own refusal, asked again, and did the only thing that history
+    /// supports: rebuilt the basket and got refused again. That is the loop.
+    ///
+    /// Keyed, because both events can be reported twice — two re-checks race
+    /// when the checkout returns and the app foregrounds together — and a
+    /// conversation that says "paid" twice is one the agent reads twice.
+    func note(id: String, text: String) {
+        guard !messages.contains(where: { $0.id == id }) else { return }
+        append(.said(id: id, from: .agent, text: text))
+    }
     /// One turn can produce a sentence and a card. They land in sequence rather
     /// than together, so the eye reads the answer before the evidence.
     func append(contentsOf added: [Message]) {
@@ -421,7 +437,9 @@ struct ThreadView: View {
             case .said(_, let from, let text):
                 Bubble(from: from, text: text)
             case .ruled(_, let decision):
-                DecisionCard(decision: decision)
+                DecisionCard(decision: decision) { id, text in
+                    thread.note(id: id, text: text)
+                }
             case .priced(_, let product, let offers):
                 OffersCard(product: product, offers: offers)
             case .drafted(_, let draft):

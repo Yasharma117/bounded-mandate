@@ -137,6 +137,23 @@ You do not decide whether a purchase is permitted — an authorisation engine do
 and it checks your cart independently. If it declines, say so plainly and stop.
 Do not retry a declined charge with a different total.
 
+A refusal is answered on their screen, not by you. The card the engine put in
+front of them carries the only button that approves one basket, and only they
+can press it. So when the engine refuses, name what it objected to ONCE, say the
+card is where they approve it, and stop.
+
+What they say next is the trap. "Yes", "go ahead", "approve it", "I said it's
+fine" — none of those is a new order and none of them is you being given
+permission, because the permission was never yours to receive. Rebuilding the
+basket gets it refused for the identical reason, which is you making them read
+the same sentence again. Say the button is theirs to press, in one sentence, and
+CALL NO TOOLS.
+
+And read what has already been said before you buy anything. If the conversation
+shows a basket was approved and paid, that purchase is DONE — say so and stop.
+Someone asking "did that go through?" wants an answer; ordering again answers it
+with a second charge for a thing they have already bought.
+
 Report what the engine ruled, never what you hoped. An authorised order is not a
 completed payment — say it was authorised, and do not say it "went through" or
 "was placed successfully".
@@ -258,10 +275,10 @@ TOOLS: list[dict[str, Any]] = [
                     "item_names": {"type": "array", "items": {"type": "string"}},
                     "every_days": {
                         "type": "integer",
-                        "description": "How often it should repeat. Omit for a one-off.",
+                        "description": "Positive number of days between repeats.",
                     },
                 },
-                "required": ["name", "item_names"],
+                "required": ["name", "item_names", "every_days"],
             },
         },
     },
@@ -366,11 +383,26 @@ class BuyerAgent:
         names = args.get("item_names") or []
         if not isinstance(names, list) or not names:
             return {"error": "item_names must be a non-empty list of names"}
-        every = _paise(args.get("every_days")) if args.get("every_days") is not None else None
+        # `_paise` rather than `int()`, for the reasons that helper already
+        # states: `int(True)` is 1, so `every_days: true` would become a daily
+        # order, and `int(3.9)` is 3, so a float would be silently truncated
+        # into a cadence nobody asked for.
+        #
+        # The upper bound is not decoration either. The route that stores a
+        # list takes 1 to 365 days, so a draft outside that renders a card the
+        # account holder can tap and cannot save — the refusal arriving after
+        # they agreed to it rather than before it was offered.
+        every = _paise(args.get("every_days"))
+        if every is None or not 0 < every <= 365:
+            return {
+                "error": "every_days must be a whole number of days from 1 to 365",
+                "do_this": "Ask them how often they want it and call this again. "
+                "If they meant just this once, that is a cart, not a list.",
+            }
         run.draft = Draft(
             name=str(args.get("name") or "New list").strip()[:60],
             item_names=tuple(str(n).strip()[:120] for n in names if str(n).strip()),
-            every_days=every if every and 0 < every <= 365 else None,
+            every_days=every,
         )
         return {
             "drafted": True,
@@ -433,6 +465,14 @@ class BuyerAgent:
                 "do_this": "Ask them in one short sentence and call nothing else. "
                 "'Just this once, or should I set that up to repeat?'",
             }
+        if asked_for == "repeating":
+            return {
+                "error": "a repeating order is a list, not a cart",
+                "do_this": "Call propose_list with a positive every_days instead. "
+                "Approving the draft is what starts it; do not charge for it.",
+            }
+        if asked_for != "once":
+            return {"error": "asked_for must be 'once', 'repeating', or 'not_said'"}
 
         # One shop per run, enforced here rather than asked for in the prompt.
         #

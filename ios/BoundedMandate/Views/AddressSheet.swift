@@ -122,6 +122,7 @@ struct AddressSheet: View {
             .contentShape(.rect)
         }
         .buttonStyle(.pressable)
+        .accessibilityValue(address.selected ? "selected" : "not selected")
         .disabled(store.saving)
         .animation(Motion.respectful(Motion.enter(), reduced: reduceMotion), value: address.selected)
     }

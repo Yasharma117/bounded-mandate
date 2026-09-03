@@ -16,6 +16,13 @@ struct DecisionCard: View {
     /// to go and ask the engine, never the answer itself.
     @Environment(\.paidGrantID) private var paidGrantID
     let decision: Decision
+    /// What the approval and the payment say back into the conversation.
+    ///
+    /// The card is where a refusal gets answered, and until this existed that
+    /// answer never reached the thread — so the agent's next turn was handed a
+    /// history ending on its own refusal and rebuilt the basket. Keyed by grant
+    /// id so a re-check that lands twice does not say it twice.
+    var note: (String, String) -> Void = { _, _ in }
 
     /// What the user approved, once they have. Held here rather than in the
     /// thread because a grant belongs to the refusal that prompted it — it is
@@ -29,6 +36,8 @@ struct DecisionCard: View {
     /// the only thing that ever reports one.
     @State private var settled: Grant?
     @State private var showingLedger = false
+    @State private var recheckTask: Task<Void, Never>?
+    @State private var recheckGeneration = 0
 
     /// The cart opens by itself when something in it is the reason for the
     /// verdict — that is the moment the reader needs to see the lines, and
@@ -73,10 +82,11 @@ struct DecisionCard: View {
         // it does not — the scheme missing, the tab left open, the user
         // switching back by hand — and the app is backgrounded for the whole
         // payment either way, so `.active` is exactly when the answer changed.
-        .onChange(of: paidGrantID) { _, _ in Task { await recheck() } }
+        .onChange(of: paidGrantID) { _, _ in beginRecheck() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await recheck() } }
+            if phase == .active { beginRecheck() }
         }
+        .onDisappear { recheckTask?.cancel() }
     }
 
     /// Ask the engine what became of the approval.
@@ -85,11 +95,25 @@ struct DecisionCard: View {
     /// opened by anything, and only the engine has seen a signed callback. A
     /// failure is silent on purpose — the card is already showing something
     /// true, and "could not re-check" is noise beside it.
-    private func recheck() async {
+    private func beginRecheck() {
+        recheckGeneration += 1
+        let generation = recheckGeneration
+        recheckTask?.cancel()
+        recheckTask = Task { await recheck(generation: generation) }
+    }
+
+    private func recheck(generation: Int) async {
         guard let id = granted?.grant.grantID, receipt == nil else { return }
         guard let fresh = try? await Engine.readGrant(id) else { return }
+        guard !Task.isCancelled, generation == recheckGeneration else { return }
         withAnimation(Motion.respectful(Motion.enter(), reduced: reduceMotion)) {
             settled = fresh
+        }
+        // The one turn that ends the subject. Without it the conversation still
+        // reads as an open refusal, and asking "did that go through?" gets the
+        // basket built a second time.
+        if fresh.paid {
+            note("paid-\(id)", "That one is paid — \(paidHeadline(fresh)) Nothing else is owed on it.")
         }
     }
 
@@ -179,38 +203,65 @@ struct DecisionCard: View {
     /// with — the cap, the shop, the address, the fifteen minutes — was derived
     /// server-side from the basket the engine fetched, so what this affords is
     /// the choice to approve, never the terms of it.
+    ///
+    /// **Filled, and the widest thing on the card.** It used to be a tinted
+    /// row under a divider, which is the same shape this card uses for "Verify
+    /// the chain" and for the cart disclosure — both of them rows you read
+    /// rather than the one control that decides whether anything gets bought.
+    /// So it read as another section of the card and went untapped, and a
+    /// refusal with an invisible way out is a refusal with no way out.
     @ViewBuilder private var approve: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            // Says what approving actually does, because the card above it has
+            // just spent four lines saying why this basket is not allowed. It
+            // is allowed if you say so — that is the whole point of the button,
+            // and it should not be something you have to infer.
+            Text("Out of scope is not the same as refused. Approve it and this "
+                 + "one basket goes through, once, at this price.")
+                .font(.system(size: 13))
+                .foregroundStyle(theme.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+
             Button {
                 Task { await mintGrant() }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: granting ? "hourglass" : "checkmark.shield")
-                        .font(.system(size: 13, weight: .semibold))
+                    Image(systemName: granting ? "hourglass" : "checkmark.shield.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                    // The same words `wording.py` gives the home card for this
+                    // action. One product, one name for approving a basket.
                     Text(granting ? "Approving…" : "Approve just this basket")
-                        .font(.system(size: 14, weight: .semibold))
-                    Spacer(minLength: 8)
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("·").opacity(0.5)
                     Text(rupees(decision.realTotalPaise))
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .monospacedDigit()
                 }
-                .foregroundStyle(theme.orchid)
-                .padding(.horizontal, 18)
-                .frame(minHeight: 48)
-                .contentShape(.rect)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+                .background(theme.orchid, in: .capsule)
+                .contentShape(.capsule)
             }
             .buttonStyle(.pressable)
             .disabled(granting)
+            .opacity(granting ? 0.6 : 1)
+            .accessibilityLabel(
+                "Approve just this basket for \(rupees(decision.realTotalPaise))"
+            )
 
             if let refusal {
                 Text(refusal)
                     .font(.system(size: 13))
                     .foregroundStyle(theme.negative)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 12)
             }
         }
+        .padding(.horizontal, 18)
+        .padding(.top, 14)
+        .padding(.bottom, 16)
     }
 
     /// What the approval turned into.
@@ -296,6 +347,11 @@ struct DecisionCard: View {
             withAnimation(Motion.respectful(Motion.enter(), reduced: reduceMotion)) {
                 granted = response
             }
+            note(
+                "grant-\(response.grant.grantID)",
+                "You approved that basket — \(rupees(decision.realTotalPaise)), once. "
+                    + "Taking you to the checkout."
+            )
             // The user just approved it; making them tap a second time to reach
             // the checkout is friction with nothing behind it. The card stays
             // as the record of what was approved.

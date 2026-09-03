@@ -151,6 +151,11 @@ final class SurfaceTests: XCTestCase {
         guard office.exists, guesthouse.exists else {
             throw XCTSkip("this account no longer has the two addresses this test names")
         }
+        let initiallySelected = app.buttons.allElementsBoundByIndex.first {
+            ($0.value as? String) == "selected"
+        }
+        XCTAssertNotNil(initiallySelected, "no selected delivery address was exposed")
+        let originalAddress = initiallySelected?.label
         // Two taps, so the test proves a real transition whatever it started
         // on. Tapping the already-chosen row is a deliberate no-op, and a
         // one-tap version passes without moving anything when the run happens
@@ -172,6 +177,12 @@ final class SurfaceTests: XCTestCase {
             "chose Office, and the home card does not say it delivers there"
         )
         capture("home-after-address")
+        if let originalAddress, !originalAddress.hasPrefix("Office") {
+            app.buttons["Delivery address"].tap()
+            let original = app.buttons[originalAddress]
+            if original.waitForExistence(timeout: 10) { original.tap() }
+            app.buttons["Done"].tap()
+        }
     }
 
     func testLeavingVoiceMidSessionDoesNotKillTheApp() {
@@ -248,7 +259,7 @@ final class SurfaceTests: XCTestCase {
             throw XCTSkip("no input field on the thread")
         }
         field.tap()
-        field.typeText("Order my usual groceries, and add the Bluetooth earbuds and a phone case.\n")
+        field.typeText("Order my usual groceries, and add the Bluetooth earbuds and a phone case, just this once.\n")
 
         // The agent runs against a live model and a live shop; this is the slow
         // part of the whole suite and there is no honest way to shorten it.
