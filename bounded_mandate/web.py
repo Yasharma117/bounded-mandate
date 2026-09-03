@@ -24,6 +24,7 @@ import os
 import re
 import secrets
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from html import escape
@@ -162,7 +163,7 @@ def load_delivery() -> str | None:
         saved = json.loads(DELIVERY_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if saved.get("backend") != BACKEND:
+    if not isinstance(saved, Mapping) or saved.get("backend") != BACKEND:
         return None
     return saved.get("delivery_id") or None
 
@@ -246,7 +247,7 @@ def load_lists() -> dict[str, ShoppingList] | None:
         return None
     try:
         saved = json.loads(LISTS_PATH.read_text(encoding="utf-8"))
-        if saved.get("backend") != BACKEND:
+        if not isinstance(saved, Mapping) or saved.get("backend") != BACKEND:
             return None
         restored = {row["list_id"]: _list_from(row) for row in saved.get("lists") or []}
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
@@ -1995,6 +1996,8 @@ def _ledger_view() -> tuple[set[str], list[dict], list[dict], dict[str, str]]:
                 }
             )
         elif payload.get("verdict"):
+            if payload.get("verdict") == Verdict.ALLOW.value:
+                rail_failed.pop(payload.get("idempotency_key"), None)
             decisions.append({**payload, "ts": entry.ts})
     return dismissed, decisions, settled, rail_failed
 

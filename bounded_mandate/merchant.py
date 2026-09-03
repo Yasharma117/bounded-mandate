@@ -292,16 +292,20 @@ class Marketplace:
                 ),
             )
 
-        here = self.merchants.get(merchant)
+        canonical = next(
+            (seller for seller in self.merchants if seller.casefold() == merchant.casefold()),
+            merchant,
+        )
+        here = self.merchants.get(canonical)
         item = here.catalog.get(name) if here else None
         if item is None:
             return None, []
         alternatives = [
             listing(seller, shop.catalog[name])
             for seller, shop in self.merchants.items()
-            if seller != merchant and name in shop.catalog
+            if seller != canonical and name in shop.catalog
         ]
-        return listing(merchant, item), alternatives
+        return listing(canonical, item), alternatives
 
     def search(self, query: str) -> list[Offer]:
         """Every seller's answer, cheapest first within each product."""

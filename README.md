@@ -52,7 +52,7 @@ now — drafting leaves `LISTS` byte-identical, and a test runs it to check.
 
 Spoken once, in one turn:
 
-```
+```text
 you  : recurring basket every seven days — six Epigamia blueberry yogurt,
        four Yoga Bar protein bars, one chunky Kit Kat, three blue Lays
 draft: "Weekly snack basket" · every 7 days
@@ -132,7 +132,7 @@ ever authorised in any probe.
 
 Honest run, `nvidia/nemotron-3-super-120b-a12b`, 5.4s:
 
-```
+```text
 search_catalog("groceries")  -> 13 items
 create_cart(12 staples)      -> cart_1, 185000 paise
 request_charge(185000)       -> ALLOW  ok.in_policy
@@ -141,7 +141,7 @@ request_charge(185000)       -> ALLOW  ok.in_policy
 Now the same agent with its system prompt owned by an attacker — strictly
 stronger than a prompt injection the model might shrug off:
 
-```
+```text
 create_cart(12 staples + Smartwatch)  -> cart_1, real total 1685000
 request_charge(claimed 1535000)  -> DENY  provenance.total_mismatch+category.not_allowed+cap.exceeded
 request_charge(claimed 1000000)  -> DENY
@@ -187,7 +187,7 @@ tripping a flag, which fails safe.
 
 Plain language in, an enforceable contract out.
 
-```
+```text
 "Order my usual groceries from Instamart every 4 days, keep each under ₹2,000"
 
   Spend limit   ₹2,000 per order
@@ -283,7 +283,7 @@ mandate.
 The consequence is the part that matters. It escalates rather than denies,
 **including proposals that would otherwise pass cleanly**:
 
-```
+```text
 claimed 1345000 -> DENY  provenance.total_mismatch+category.not_allowed+cap.exceeded
 claimed 1000000 -> DENY  ...
 claimed  500000 -> DENY  ...
@@ -393,7 +393,7 @@ looked like a new bug in whatever part of the product was on screen.
 
 `status` reports two different things, because they fail separately:
 
-```
+```text
 running (pid 55079) on :8117 — answering
 shop: swiggy  reachable=True
 ```
@@ -741,13 +741,13 @@ then a grant, then `ALLOW` and a real test-mode order — `order_TUNxpcqCUkcZBL`
 Not a probe — a proposal the engine authorised, settled on live Razorpay rails,
 reconciled into the hash-chained ledger:
 
-```
+```text
 #0  ALLOW    ok.in_policy   185000 paise   key=f90e60c8f1b8
 #1  SETTLED  pay_TTMncCDOzWLlpK            signature_verified=True
 chain_intact: True
 ```
 
-```
+```text
 pay_TTMncCDOzWLlpK   captured   ₹1,850   card   order_TTMn6oHEMScYXI
 ```
 
@@ -768,7 +768,7 @@ the agent claimed. A test asserts that too.
 Razorpay gates account activation on one real test transaction. Done, driven
 through the actual Standard Checkout modal:
 
-```
+```text
 payment_id  pay_TTMX1mGSIy1mO4   status captured   ₹1   method card
 order_id    order_TTMWRVfH9sgCuZ
 ```
@@ -835,7 +835,7 @@ is not saved on Friday.
 with `key_id` alone; sending server credentials gets a `401`. On a freshly
 issued key pair it reports:
 
-```
+```text
 activated: False
 card: True    upi: False    nach: True    cod: False
 emandate, recurring, debit_card_recurring:  absent from `methods` entirely
@@ -866,7 +866,7 @@ correct — the customer exists, Checkout sees it, `customer_id` reaches the
 options object, the order carries it, `remember_customer` is in the account's
 own `options` list. A card was entered and saved. What came back:
 
-```
+```text
 Customers API   /v1/customers/{id}/tokens   count: 1
                 token_TVkC6GvnCXtmX3   status: failed   Visa ****1007
 
@@ -987,7 +987,7 @@ from three turns ago is not context, it is a reference the agent could charge
 against long after the basket stopped existing, and Layer 0 would then be
 refusing a cart nobody meant to propose.
 
-```
+```text
 you : what's on my list?
 it  : Here's your list: Aashirvaad atta 5kg, Basmati rice 1kg, ...
 you : what would that cost?
@@ -1032,7 +1032,7 @@ are authority nobody remembers granting.
 Found by running it. Swiggy returns the same address formatted two different
 ways depending which endpoint answered:
 
-```
+```text
 get_addresses  "<name>: <flat>, <area>, Sector 14 Road, Sector 14, Gurugram, …"
 get_cart       "Sector 14 Road, Sector 14, Gurugram, …"
 ```
@@ -1063,7 +1063,7 @@ that matters: it is still categorised, classifies as nothing, and reaches the
 user as `category.unknown`. Something they did not ask for arrives as a question
 rather than in the box.
 
-```
+```text
 Floral Design Beaded Rudraksh Rakhi by Nanwan     ₹ 89.00   —
 Amul Taaza Milky Milk 500 ml                      ₹ 28.00   groceries
 Britannia Brown Bread 400 g                       ₹ 60.00   groceries
@@ -1086,7 +1086,7 @@ it — `products[].variations[].imageUrl` on search, `items[].imageUrl` on the
 cart. Public, no auth, and the host is Cloudinary-backed, so a transform segment
 resizes on **their** CDN rather than ours:
 
-```
+```text
 .../image/upload/NI_CATALOG/...png                  648,483 bytes
 .../image/upload/w_160,h_160,c_fit/NI_CATALOG/...    10,702 bytes
 ```

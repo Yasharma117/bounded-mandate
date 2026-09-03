@@ -322,7 +322,9 @@ class TestAuthorityCannotBeWidened:
         )
         run = AgentRun("x")
         out = agent._dispatch(
-            run, "propose_list", {"name": "Snacks", "item_names": ["Blue Lays x3"]}
+            run,
+            "propose_list",
+            {"name": "Snacks", "item_names": ["Blue Lays x3"], "every_days": 7},
         )
 
         assert out["drafted"] is True

@@ -29,8 +29,13 @@ USABLE="http://127.0.0.1:${PORT}/api/home"     # can it reach the shop?
 
 running() {  # a live pid from our own pidfile
     [ -f "$PIDFILE" ] || return 1
-    local pid; pid=$(cat "$PIDFILE" 2>/dev/null) || return 1
-    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+    local pid identity current
+    pid=$(sed -n '1p' "$PIDFILE" 2>/dev/null) || return 1
+    identity=$(sed -n '2p' "$PIDFILE" 2>/dev/null) || return 1
+    [ -n "$pid" ] && [ -n "$identity" ] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    current=$(ps -p "$pid" -o command= 2>/dev/null) || return 1
+    [ "$current" = "$identity" ]
 }
 
 answering() { curl -fsS -o /dev/null --max-time 2 "$LIVE" 2>/dev/null; }
@@ -44,10 +49,13 @@ start() {
         echo "  another start is in progress"
         return 1
     fi
-    trap 'rmdir "$LOCKDIR" 2>/dev/null || true' RETURN
+    cleanup_lock() { rmdir "$LOCKDIR" 2>/dev/null || true; }
+    trap cleanup_lock EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 
     if running; then
-        echo "  already running (pid $(cat "$PIDFILE")) on :$PORT"; return 0
+        echo "  already running (pid $(sed -n '1p' "$PIDFILE")) on :$PORT"; return 0
     fi
     # The port, not just the pidfile. A stale uvicorn from another terminal
     # serving an older shape of the API is the failure this project has already
@@ -96,6 +104,15 @@ with open(logfile, "ab") as log:
     )
 open(pidfile, "w").write(str(child.pid) + "\n")
 LAUNCH
+    local pid identity
+    pid=$(sed -n '1p' "$PIDFILE")
+    # `|| true`, because the honest answer for a server that has already exited
+    # is an empty identity. Without it, `set -e` takes the whole script out on
+    # this line — past the "died on startup" diagnostic below, and leaving the
+    # stale pidfile this file exists to prevent. An empty identity fails
+    # `running`, which is exactly what routes into that diagnostic.
+    identity=$(ps -p "$pid" -o command= 2>/dev/null || true)
+    printf '%s\n%s\n' "$pid" "$identity" > "$PIDFILE"
 
     # "Started" means answering. A pid that exits half a second later because
     # the port was taken is not a running engine, and reporting it as one is how
@@ -106,7 +123,7 @@ LAUNCH
     local deadline=$((SECONDS + 30))
     while [ "$SECONDS" -lt "$deadline" ]; do
         if answering; then
-            echo "  started (pid $(cat "$PIDFILE")) on :$PORT"
+            echo "  started (pid $(sed -n '1p' "$PIDFILE")) on :$PORT"
             status_line
             return 0
         fi
@@ -123,7 +140,7 @@ stop() {
         echo "  not running"
         return 0
     fi
-    local pid; pid=$(cat "$PIDFILE")
+    local pid; pid=$(sed -n '1p' "$PIDFILE")
     kill "$pid" 2>/dev/null || true
     for _ in $(seq 1 20); do
         kill -0 "$pid" 2>/dev/null || break
@@ -161,12 +178,12 @@ READ
 
 status() {
     if running && answering; then
-        echo "  running (pid $(cat "$PIDFILE")) on :$PORT — answering"
+        echo "  running (pid $(sed -n '1p' "$PIDFILE")) on :$PORT — answering"
         status_line
         return 0
     fi
     if running; then
-        echo "  pid $(cat "$PIDFILE") is alive but :$PORT is not answering"
+        echo "  pid $(sed -n '1p' "$PIDFILE") is alive but :$PORT is not answering"
         return 1
     fi
     if lsof -ti ":$PORT" >/dev/null 2>&1; then

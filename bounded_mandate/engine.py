@@ -305,22 +305,37 @@ def _history(ledger: Ledger, policy: Policy, now: datetime) -> _History:
     """
     since_window = (now - timedelta(days=policy.window_days)).isoformat()
     since_probe = (now - PROBE_WINDOW).isoformat()
-    allowed: list[tuple[str, str]] = []
-    rail_failed: set[str] = set()
+    #: idempotency key -> its latest outcome and timestamp. `allowed` counts as
+    #: money; `failed` is an ALLOW the rail refused, which spent nothing.
+    outcomes: dict[str, tuple[str, str]] = {}
     denials = 0
     for entry in ledger.entries():
         p = entry.payload
-        # Collected before the mandate filter, because a rail failure is about a
+        # Read before the mandate filter, because a rail failure is about a
         # decision rather than a mandate and carries no mandate id. The key it
         # does carry is mandate-specific already — it is derived from the
         # mandate, the window and the cart — so this cannot cross wires.
         if p.get("event") == "RAIL_FAILED":
-            rail_failed.add(p.get("idempotency_key"))
+            outcomes[p.get("idempotency_key")] = ("failed", entry.ts)
             continue
         if p.get("mandate_id") != policy.mandate_id:
             continue
+        # Last write wins, and that is the whole fix for the retry case. A retry
+        # of the same cart in the same window is the same key by construction,
+        # so its ALLOW lands on top of the earlier failure and the key counts
+        # again. What this replaced was a permanent key-wide veto that nothing
+        # ever lifted: allow, rail fails, retry succeeds and is paid — and the
+        # paid basket could still be authorised a third time while the charge
+        # that did go through never spent the window.
+        #
+        # `SETTLED` is deliberately not read here. It is the obvious thing to
+        # reach for, and it cannot work: the one writer records a grant id and
+        # no idempotency key, and a grant whose rail failed hands out no
+        # checkout, so no settlement can follow a failure in the first place. A
+        # branch for it would be unreachable code in the middle of the count
+        # that decides whether money may move twice.
         if p.get("verdict") == Verdict.ALLOW.value:
-            allowed.append((p.get("idempotency_key"), entry.ts))
+            outcomes[p.get("idempotency_key")] = ("allowed", entry.ts)
         elif p.get("verdict") == Verdict.DENY.value and entry.ts >= since_probe:
             denials += 1
 
@@ -335,10 +350,10 @@ def _history(ledger: Ledger, policy: Policy, now: datetime) -> _History:
     #
     # This cannot widen authority. `RAIL_FAILED` is written in one place, only
     # when the gateway itself raised, and it means no order exists — so what is
-    # being discounted here is a charge that provably did not happen.
-    spent = [(key, ts) for key, ts in allowed if key not in rail_failed]
-    charges = sum(1 for _, ts in spent if ts >= since_window)
-    return _History(charges, frozenset(key for key, _ in spent), denials)
+    # discounted is a charge that provably did not happen, and only that one.
+    charged = {key: ts for key, (outcome, ts) in outcomes.items() if outcome == "allowed"}
+    charges = sum(1 for ts in charged.values() if ts >= since_window)
+    return _History(charges, frozenset(charged), denials)
 
 
 def _probe_reason(denials: int) -> list[Reason]:

@@ -5,7 +5,8 @@
 # server on the port". Both of those are worth trying to break rather than
 # trusting, since the whole reason this file exists is that the previous
 # arrangement failed silently and got blamed on unrelated features.
-cd /Users/yashsharma/BUILDATHON
+ ROOT=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+ cd "$ROOT"
 
 E=./scripts/engine.sh
 PORT=8117
@@ -24,12 +25,22 @@ echo
 echo "=== the original failure: signals aimed at whoever launched it ==="
 
 $E stop >/dev/null 2>&1
-$E start >/dev/null 2>&1
-ENGINE=$(cat .engine.pid)
-
-# A subshell starts nothing — but this is the shape that killed it before: a
-# signal to the *group* of the process that launched the engine.
-kill -TERM -$$ 2>/dev/null || true
+# Keep the verifier outside the group being signaled. The launcher remains
+# alive after startup so the group signal has a real target; the engine itself
+# starts its own session and must survive it.
+python3 - "$E" <<'LAUNCH' &
+import os, subprocess, sys, time
+os.setsid()
+subprocess.run([sys.argv[1], "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(30)
+LAUNCHER=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    up && break
+    sleep 0.25
+done
+kill -TERM -"$LAUNCHER" 2>/dev/null || true
+wait "$LAUNCHER" 2>/dev/null || true
+ENGINE=$(sed -n '1p' .engine.pid)
 sleep 1
 up && report "survives SIGTERM to the launching process group" 1 || report "survives SIGTERM to the launching process group" 0
 
@@ -39,8 +50,6 @@ sleep 1
 up && report "survives SIGHUP (a closed terminal)" 1 || report "survives SIGHUP (a closed terminal)" 0
 
 echo
-echo "=== stale and corrupt pidfiles ==="
-
 # A pidfile naming a pid that is long gone.
 $E stop >/dev/null 2>&1
 echo "999999" > .engine.pid
@@ -115,6 +124,26 @@ echo
 echo "=== state survives a restart storm ==="
 
 $E status >/dev/null 2>&1 || $E start >/dev/null 2>&1
+ORIGINAL_DAYS=$(curl -fsS "http://127.0.0.1:$PORT/api/lists" | python3 -c "
+import json,sys
+print(next(item['every_days'] for item in json.load(sys.stdin)['lists'] if item['list_id']=='usual'))")
+ORIGINAL_ADDRESS=$(curl -fsS "http://127.0.0.1:$PORT/api/addresses" | python3 -c "
+import json,sys
+print(json.load(sys.stdin)['delivery_id'])")
+# Only put back what was actually read. If the snapshot curl failed, the
+# variable is empty — and "restoring" that sends `{"every_days":}`, which the
+# API refuses and `|| true` swallows, leaving the probe's own 11 days on the
+# user's list while the script reports it tidied up after itself.
+restore_state() {
+    [ -n "${ORIGINAL_DAYS:-}" ] && curl -fsS -X PUT "http://127.0.0.1:$PORT/api/list/usual/schedule" \
+        -H "Content-Type: application/json" -d "{\"every_days\":$ORIGINAL_DAYS}" >/dev/null 2>&1
+    [ -n "${ORIGINAL_ADDRESS:-}" ] && curl -fsS -X PUT "http://127.0.0.1:$PORT/api/address" \
+        -H "Content-Type: application/json" -d "{\"address_id\":\"$ORIGINAL_ADDRESS\"}" >/dev/null 2>&1
+    return 0
+}
+trap restore_state EXIT
+trap 'restore_state; exit 130' INT
+trap 'restore_state; exit 143' TERM
 curl -fsS -X PUT "http://127.0.0.1:$PORT/api/list/usual/schedule" \
      -H "Content-Type: application/json" -d '{"every_days":11}' >/dev/null 2>&1
 curl -fsS -X PUT "http://127.0.0.1:$PORT/api/address" \
@@ -133,10 +162,6 @@ import json,sys; print(json.load(sys.stdin)['delivery_id'])" 2>/dev/null)
 
 echo
 echo "=== put it back the way the demo wants it ==="
-curl -fsS -X PUT "http://127.0.0.1:$PORT/api/list/usual/schedule" \
-     -H "Content-Type: application/json" -d '{"every_days":4}' >/dev/null 2>&1
-curl -fsS -X PUT "http://127.0.0.1:$PORT/api/address" \
-     -H "Content-Type: application/json" -d '{"address_id":"d86lmbjedmej3uqmebcg"}' >/dev/null 2>&1
 $E status | sed 's/^/  /'
 
 echo

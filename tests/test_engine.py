@@ -408,6 +408,26 @@ def test_retrying_a_cart_the_rail_refused_is_not_a_duplicate(policy, ledger):
     assert "duplicate.suppressed" not in retry.reason_code
 
 
+def test_a_settled_retry_restores_the_key_as_charged(policy, ledger):
+    """A recovered payment must remain charged after its earlier rail failure."""
+    policies = {"mdt_1": replace(policy, max_charges_per_window=1)}
+    adapter = merchant_holding(groceries())
+
+    first = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    rail_failed(ledger, first)
+    retry = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    ledger.append(
+        {
+            "event": "SETTLED",
+            "idempotency_key": retry.idempotency_key,
+            "cart_id": retry.cart_id,
+        }
+    )
+
+    again = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    assert "duplicate.suppressed" in again.reason_code
+
+
 def test_an_allow_that_did_reach_the_rail_still_spends_the_window(policy, ledger):
     """The other half, and the one that matters: discounting a failure must not
     become discounting a purchase. Same shape as the test above, without the
@@ -419,6 +439,104 @@ def test_an_allow_that_did_reach_the_rail_still_spends_the_window(policy, ledger
 
     second = run(Proposal("mdt_1", "cart_2", 185_000), policies, adapter, ledger)
     assert "frequency.exceeded" in second.reason_code
+
+
+def test_a_retry_that_did_reach_the_rail_stops_being_discounted(policy, ledger):
+    """The failure is discounted; the retry that worked must not be.
+
+    A retry of the same cart in the same window is the same idempotency key by
+    construction, so a `RAIL_FAILED` that vetoed the *key* vetoed every later
+    ALLOW under it too — and nothing ever lifted the veto. Measured before this:
+    allow, rail fails, retry succeeds and is paid, and a third proposal for that
+    same paid basket still came back ALLOW while the charge that did go through
+    never counted against a window of one. Two ways to spend the same money.
+
+    So a failure cancels the attempt it followed, and only that one.
+    """
+    policies = {"mdt_1": replace(policy, max_charges_per_window=1)}
+    adapter = merchant_holding(groceries(), groceries(cart_id="cart_2"))
+
+    first = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    rail_failed(ledger, first)
+
+    # The retry reaches the rail. No `RAIL_FAILED` follows it, so it is a charge.
+    retry = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    assert retry.verdict is Verdict.ALLOW, retry.reason_code
+
+    third = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    assert "duplicate.suppressed" in third.reason_code, "a paid cart was authorised again"
+
+    other = run(Proposal("mdt_1", "cart_2", 185_000), policies, adapter, ledger)
+    assert "frequency.exceeded" in other.reason_code, "the paid retry never spent the window"
+
+
+def test_a_second_outage_on_the_same_cart_is_still_discounted(policy, ledger):
+    """Cancelling per attempt has to survive more than one attempt: two failures
+    in a row are two charges that did not happen, not one."""
+    policies = {"mdt_1": replace(policy, max_charges_per_window=1)}
+    adapter = merchant_holding(groceries(), groceries(cart_id="cart_2"))
+
+    for _ in range(2):
+        attempt = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+        assert attempt.verdict is Verdict.ALLOW, attempt.reason_code
+        rail_failed(ledger, attempt)
+
+    other = run(Proposal("mdt_1", "cart_2", 185_000), policies, adapter, ledger)
+    assert "frequency.exceeded" not in other.reason_code
+
+
+def test_a_settlement_for_another_mandate_does_not_spend_this_one(policy, ledger):
+    """The mirror of the test below, and the one the settled-outcome branch
+    needs. `SETTLED` carries no mandate id, so it is read before the mandate
+    filter — which meant any settlement carrying an idempotency key counted as a
+    charge against every mandate's window at once. A settlement may only confirm
+    a key this mandate was already seen to allow."""
+    policies = {"mdt_1": replace(policy, max_charges_per_window=1)}
+    adapter = merchant_holding(groceries())
+
+    ledger.append(
+        {
+            "event": "SETTLED",
+            "idempotency_key": "a_key_belonging_to_something_else",
+            "razorpay_payment_id": "pay_elsewhere",
+            "grant_id": "grant_elsewhere",
+        }
+    )
+
+    first = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    assert "frequency.exceeded" not in first.reason_code, first.reason_code
+
+
+def test_the_full_retry_sequence_leaves_one_charge(policy, ledger):
+    """ALLOW -> RAIL_FAILED -> ALLOW -> SETTLED, end to end.
+
+    The retry's own ALLOW is what makes the key count again; the settlement is
+    inert here and the test says so deliberately. Reading `SETTLED` is the
+    obvious thing to reach for and it cannot work — the one writer records a
+    grant id and no idempotency key, and a grant whose rail failed hands out no
+    checkout, so no settlement can follow a failure at all. Pinned because the
+    next person to look at this will have the same idea.
+    """
+    policies = {"mdt_1": replace(policy, max_charges_per_window=1)}
+    adapter = merchant_holding(groceries(), groceries(cart_id="cart_2"))
+
+    first = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    rail_failed(ledger, first)
+    retry = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    assert retry.verdict is Verdict.ALLOW, retry.reason_code
+    ledger.append(
+        {
+            "event": "SETTLED",
+            "idempotency_key": retry.idempotency_key,
+            "razorpay_payment_id": "pay_ok",
+            "grant_id": "grant_ok",
+        }
+    )
+
+    third = run(Proposal("mdt_1", "cart_1", 185_000), policies, adapter, ledger)
+    assert "duplicate.suppressed" in third.reason_code
+    other = run(Proposal("mdt_1", "cart_2", 185_000), policies, adapter, ledger)
+    assert "frequency.exceeded" in other.reason_code
 
 
 def test_a_rail_failure_for_another_mandate_does_not_free_this_one(policy, ledger):

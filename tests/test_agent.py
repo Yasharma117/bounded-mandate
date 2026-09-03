@@ -303,6 +303,94 @@ def test_a_long_conversation_cannot_push_out_the_system_prompt(policies, ledger)
     assert len(seen[0]) <= 2 + 10, "history is not bounded"
 
 
+def test_a_repeating_draft_needs_a_real_cadence(policies, ledger):
+    """`every_days` is required now, so the ways it can arrive wrong are the
+    thing to pin. A bool is not a cadence — `int(True)` is 1, which would turn
+    `every_days: true` into a daily order — and 400 days is one `POST /api/lists`
+    will refuse, so offering it drafts a card that cannot be saved."""
+    agent = build(scripted(), policies, ledger)
+    for bad in (None, 0, -7, True, 3.9, "soon", 400):
+        run = AgentRun("x")
+        out = agent._dispatch(
+            run,
+            "propose_list",
+            {"name": "Snacks", "item_names": ["Blue Lays x3"], "every_days": bad},
+        )
+        assert "error" in out, f"{bad!r} was accepted as a cadence"
+        assert run.draft is None
+
+    run = AgentRun("x")
+    agent._dispatch(
+        run, "propose_list", {"name": "Snacks", "item_names": ["Blue Lays x3"], "every_days": 7}
+    )
+    assert run.draft is not None and run.draft.every_days == 7
+
+
+def test_a_repeating_cart_is_sent_back_to_the_drafting_tool(policies, ledger):
+    """`asked_for="repeating"` used to build a cart and charge for it, which is
+    the guess the whole cadence gate exists to stop: a standing order placed once
+    and never again, or charged now for something they wanted weekly."""
+    agent = build(scripted(), policies, ledger)
+    out = agent._dispatch(
+        AgentRun("x"),
+        "create_cart",
+        {"item_names": ["Toned milk 1L x2"], "asked_for": "repeating", "merchant": SHOP},
+    )
+    assert "error" in out and "cart_id" not in out
+    assert "propose_list" in out.get("do_this", "")
+
+    # And a value from neither the enum nor the schema is refused rather than
+    # falling through to a purchase.
+    junk = agent._dispatch(
+        AgentRun("x"),
+        "create_cart",
+        {"item_names": ["Toned milk 1L x2"], "asked_for": "sure", "merchant": SHOP},
+    )
+    assert "error" in junk and "cart_id" not in junk
+
+
+def test_the_agent_is_told_a_refusal_is_answered_somewhere_it_cannot_reach(policies, ledger):
+    """The loop this closes, seen live: an item outside the grocery scope was
+    escalated, the user approved and paid it on the card, and every following
+    turn rebuilt the same basket and read the same refusal back to them.
+
+    Two things were missing. The conversation never recorded the approval — the
+    client fixes that by saying it into the thread — and the agent had no rule
+    for the sentence that comes after a refusal. "Yes, go ahead" is not
+    permission it can act on, because approving one basket is a button only the
+    account holder can press, and there is no tool here that reaches it.
+    """
+    seen: list[list[dict]] = []
+
+    def create(**kwargs):
+        seen.append(list(kwargs["messages"]))
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok", tool_calls=None))]
+        )
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    build(client, policies, ledger).run(
+        "yes, go ahead",
+        history=[
+            {"from": "user", "text": "order a bar of chocolate"},
+            {"from": "agent", "text": "That needs you — chocolate is outside your scope."},
+        ],
+    )
+
+    prompt = seen[0][0]["content"]
+    assert seen[0][0]["role"] == "system"
+    # It cannot approve, and it is told where approving actually happens.
+    assert "approve" in prompt.lower()
+    assert "CALL NO TOOLS" in prompt
+    # And a basket this conversation already paid for is not one to order again.
+    assert "paid" in prompt.lower()
+
+    # No tool mints authority, which is what makes the rule above safe to state
+    # as manners rather than enforce: the worst a disobedient turn costs is a
+    # second refusal, never a second charge.
+    assert not {"approve", "grant", "one_time"} & {t["function"]["name"] for t in TOOLS}
+
+
 # --- a model producing junk is expected -----------------------------------------
 
 

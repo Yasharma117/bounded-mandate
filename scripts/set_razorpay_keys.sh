@@ -8,6 +8,7 @@
 # API Keys -> Generate Test Key. The secret is shown exactly once.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+umask 077
 
 [ -f .env ] || { echo "no .env here — run this from the repo"; exit 1; }
 
@@ -23,10 +24,11 @@ esac
 [ -n "$KSEC" ] || { echo "empty secret"; exit 1; }
 
 cp .env ".env.backup.$(date +%s)"
+chmod 600 .env.backup.*
 
-python3 - "$KID" "$KSEC" <<'PY'
+python3 -c "$(cat <<'PY'
 import pathlib, sys
-kid, sec = sys.argv[1], sys.argv[2]
+kid, sec = sys.argv[1], sys.stdin.readline().rstrip("\n")
 p = pathlib.Path(".env")
 out, seen = [], set()
 for line in p.read_text().splitlines():
@@ -41,13 +43,21 @@ if "secret" not in seen:
     out.append(f"RAZORPAY_KEY_SECRET={sec}")
 p.write_text("\n".join(out) + "\n")
 PY
+ )" "$KID" < <(printf '%s\n' "$KSEC")
 
 chmod 600 .env
 echo "written to .env (mode 600, previous copy kept as .env.backup.*)"
 
 # Prove it works before you find out on camera.
 set -a; . ./.env; set +a
-code=$(curl -s -o /dev/null -w "%{http_code}" -u "$RAZORPAY_KEY_ID:$RAZORPAY_KEY_SECRET" \
+NETRC=$(mktemp)
+# Armed before anything is written to it. A Ctrl-C in the window between the
+# write and the trap would leave the secret on disk, which is the one outcome
+# this whole file exists to avoid.
+trap 'rm -f "$NETRC"' EXIT INT TERM
+chmod 600 "$NETRC"
+printf 'machine api.razorpay.com login %s password %s\n' "$KID" "$KSEC" > "$NETRC"
+code=$(curl -s -o /dev/null -w "%{http_code}" --netrc-file "$NETRC" \
   -X POST https://api.razorpay.com/v1/orders \
   -H "Content-Type: application/json" -d '{"amount":100,"currency":"INR"}')
 case "$code" in

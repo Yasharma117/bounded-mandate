@@ -5,12 +5,18 @@ final class HomeStore {
     private(set) var home: Home?
     private(set) var problem: String?
     private(set) var working = false
+    private var loadGeneration = 0
 
     func load() async {
+        loadGeneration += 1
+        let generation = loadGeneration
         do {
-            home = try await Engine.readHome()
+            let fresh = try await Engine.readHome()
+            guard generation == loadGeneration else { return }
+            home = fresh
             problem = nil
         } catch {
+            guard generation == loadGeneration else { return }
             problem = error.localizedDescription
         }
     }
