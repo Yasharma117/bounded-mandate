@@ -4,10 +4,14 @@ import SwiftUI
 
 /// A spoken conversation, rather than a recording you send.
 ///
-/// The loop runs itself: listen until you stop talking, transcribe, hand it to
-/// the agent, speak the verdict, listen again. Nothing is pressed twice. That is
-/// the difference between a microphone button and a voice mode, and it is the
-/// only reason a hands-free grocery order is a believable thing to demo.
+/// **Push to talk.** The microphone is open while the circle is held and shut
+/// the moment it is let go, so a turn is something you did rather than
+/// something the room did. It ran itself once — listen until 1.4s of quiet,
+/// transcribe, answer, listen again — which is the better interaction right up
+/// until the person holding the phone is also talking to somebody else. Then
+/// narration, a question from the room and a television all arrive as
+/// utterances, and an agent that spends money should not take dictation from a
+/// conversation it was never part of.
 ///
 /// Turns land in the **same thread** the typed conversation uses. Voice is a
 /// state of the conversation, not a separate screen: a duplicate transcript
@@ -27,8 +31,8 @@ final class VoiceSession {
 
         var label: String {
             switch self {
-            case .idle: "Tap to talk"
-            case .listening: "Listening"
+            case .idle: "Hold to talk"
+            case .listening: "Listening — let go to send"
             case .thinking: "Working on it"
             case .speaking: "Speaking"
             }
@@ -45,7 +49,7 @@ final class VoiceSession {
     /// **Weak, not `unowned`.** `unowned` asserts the thread outlives the
     /// session, which is true right up until somebody closes the voice screen
     /// mid-turn: `ThreadView` owns the `Thread` in `@State`, dismissing the
-    /// cover tears that down, and the session's `loop` task is still running a
+    /// cover tears that down, and the session's turn task is still running a
     /// round trip that then touches it. Swift traps that as
     /// `swift_abortRetainUnowned` and the app dies — `EXC_CRASH / SIGABRT`, no
     /// message, no recovery.
@@ -58,24 +62,16 @@ final class VoiceSession {
     init(thread: Thread) { self.thread = thread }
 
 
-    /// Stop after this much quiet **once you have actually said something**.
-    private let silenceSeconds: TimeInterval = 1.4
-    private let silenceThreshold: Float = -38
-    /// How long to wait for a first word before admitting it cannot hear you.
-    private let patienceSeconds: TimeInterval = 12
-
     private let audio = AudioIO()
-    private var loop: Task<Void, Never>?
-    private var quietSince: Date?
-    private var heardSpeech = false
-    private var openedMic: Date?
+    /// The turn in flight. One at a time — a press cancels the one before it.
+    private var turn: Task<Void, Never>?
+    /// True from press to release, and the only thing holding the mic open.
+    private var held = false
     private var running = false
     /// Which service speaks. Changed live, so both can be judged by ear.
     private(set) var provider: String?
     /// What the engine can speak with, asked once when voice mode opens.
     private(set) var providers: [String] = []
-
-    var isActive: Bool { phase != .idle }
 
     func use(provider name: String) { provider = name }
 
@@ -87,8 +83,10 @@ final class VoiceSession {
         if provider == nil { provider = answer.current }
     }
 
-    // MARK: - the loop
+    // MARK: - a turn
 
+    /// Opens voice mode: permission, the voices, and the audio session. It
+    /// listens to nothing until you hold the circle.
     func start() async {
         guard !running else { return }
         problem = nil
@@ -98,22 +96,6 @@ final class VoiceSession {
         }
         running = true
         await loadProviders()
-        // The whole conversation is one task. Cancelling it is how it stops,
-        // which means no path can leave a half-configured session behind.
-        loop = Task { await converse() }
-    }
-
-    func stop() {
-        running = false
-        loop?.cancel()
-        loop = nil
-        quietSince = nil
-        level = 0
-        phase = .idle
-        Task { await audio.end() }
-    }
-
-    private func converse() async {
         do {
             // Once per voice mode, not once per turn. Every hand-over used to
             // pay this again, which is why later turns felt worse than the
@@ -122,81 +104,79 @@ final class VoiceSession {
         } catch {
             problem = error.localizedDescription
             stop()
-            return
-        }
-
-        while running, !Task.isCancelled {
-            guard let heard = await listen() else { break }
-            guard Voice.isSpeech(heard) else { continue }
-            await answer(heard)
         }
     }
 
-    /// Records until the speaker goes quiet, then transcribes. `nil` ends the
-    /// conversation; an empty string means "nothing worth sending, go again".
-    private func listen() async -> String? {
+    func stop() {
+        running = false
+        held = false
+        turn?.cancel()
+        turn = nil
+        level = 0
+        phase = .idle
+        Task { await audio.end() }
+    }
+
+    /// Held. Everything from here until `release()` is the utterance.
+    ///
+    /// Pressing while it is still speaking interrupts it, which is what a
+    /// person does. The new turn waits for the cancelled one to unwind rather
+    /// than racing it, so the phase the screen shows is always this turn's.
+    func press() {
+        guard running, !held else { return }
+        held = true
+        let previous = turn
+        previous?.cancel()
+        turn = Task {
+            await previous?.value
+            await takeTurn()
+        }
+    }
+
+    /// Let go. The recording stops within a meter tick and goes up as it is.
+    func release() { held = false }
+
+    private func takeTurn() async {
+        await audio.stopPlaying()
+        problem = nil
         phase = .listening
-        quietSince = nil
-        heardSpeech = false
-        openedMic = Date()
 
         do {
             _ = try await audio.startRecording()
         } catch {
             problem = error.localizedDescription
-            return nil
+            phase = .idle
+            return
         }
 
-        while running, !Task.isCancelled {
+        while running, held, !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(50))
             guard let power = await audio.inputPower() else { break }
-            if await meter(power) { break }
+            // -60 dB is effectively silence, 0 is clipping. Squared so quiet
+            // speech still moves the field without loud speech pinning it.
+            let normalised = Double(max(0, (power + 60) / 60))
+            level = smoothed(normalised * normalised)
         }
-        guard running, !Task.isCancelled else { return nil }
 
         phase = .thinking
         level = 0
 
         do {
             let captured = try await audio.finishRecording()
-            // Shorter than this is the room moving, not a person.
-            guard captured.count > 4_000 else { return "" }
-            return try await Voice.transcribe(captured)
+            // A tap rather than a hold: too short to be anything anybody said.
+            guard running, !Task.isCancelled, captured.count > 4_000 else {
+                phase = .idle
+                return
+            }
+            let heard = try await Voice.transcribe(captured)
+            // Held or not, the room can still be in the recording — a
+            // television behind you does not stop for the press.
+            if Voice.isSpeech(heard) { await answer(heard) }
         } catch is CancellationError {
-            return nil
         } catch {
             problem = error.localizedDescription
-            return ""
         }
-    }
-
-    /// Returns true when the turn is over. Also drives the backdrop.
-    private func meter(_ power: Float) async -> Bool {
-        // -60 dB is effectively silence, 0 is clipping. Squared so quiet speech
-        // still moves the field without loud speech pinning it.
-        let normalised = Double(max(0, (power + 60) / 60))
-        level = smoothed(normalised * normalised)
-
-        guard power < silenceThreshold else {
-            heardSpeech = true
-            quietSince = nil
-            return false
-        }
-
-        // Nothing said yet: this is the pause before you start, not the pause
-        // after you finish. Waiting is correct — up to a point, because silence
-        // forever and a broken microphone look identical from the outside.
-        guard heardSpeech else {
-            if let opened = openedMic, Date().timeIntervalSince(opened) >= patienceSeconds {
-                problem = "I can't hear anything. Check the microphone, then tap to try again."
-                stop()
-            }
-            return false
-        }
-
-        let since = quietSince ?? Date()
-        quietSince = since
-        return Date().timeIntervalSince(since) >= silenceSeconds
+        phase = .idle
     }
 
     private func answer(_ heard: String) async {

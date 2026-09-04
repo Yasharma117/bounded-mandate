@@ -198,7 +198,12 @@ final class SurfaceTests: XCTestCase {
             app.buttons["Back"].waitForExistence(timeout: 15),
             "the thread screen did not open"
         )
-        sleep(3)  // let the session actually start before leaving
+        // Hold long enough to put a turn in flight, which is the state this
+        // test exists for: the teardown is only dangerous while a task is
+        // running against the `Thread` that `@State` is about to release.
+        let orb = app.buttons["Hold to talk"]
+        XCTAssertTrue(orb.waitForExistence(timeout: 10), "no orb to hold")
+        orb.press(forDuration: 2)
 
         app.buttons["Back"].tap()
 

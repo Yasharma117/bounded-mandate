@@ -170,6 +170,8 @@ struct ThreadView: View {
     /// background arrives with the morph instead of cutting to blue a frame
     /// before it.
     @State private var voiceness: Double = 0
+    /// Finger down on the orb. Push to talk, so this *is* the microphone.
+    @State private var holding = false
 
 
     var body: some View {
@@ -283,6 +285,7 @@ struct ThreadView: View {
                 HStack(spacing: 10) {
                     if let voice {
                         orb(voice)
+                        leave
                     } else {
                         field
                     }
@@ -396,35 +399,76 @@ struct ThreadView: View {
 
     /// The field, grown. Same glass, same identity — so it stretches into place
     /// rather than one control vanishing and another appearing.
+    ///
+    /// **Held, not tapped.** A `DragGesture` of zero distance rather than
+    /// `LongPressGesture`, because a long press only fires once its own delay
+    /// has passed and the first half-second of every sentence was landing in
+    /// that gap. Down is down: the microphone opens on the first touch event
+    /// and closes on the last one.
     private func orb(_ session: VoiceSession) -> some View {
+        ZStack {
+            Circle()
+                .fill(theme.primary.opacity(0.14))
+                // 1.22 rather than 1.42: at the old size a loud syllable
+                // made the control jump, which reads as instability rather
+                // than as listening. The level is already smoothed in the
+                // session, so this reads it straight — animating a value
+                // that changes twenty times a second just stacks twenty
+                // overlapping animations and costs frames.
+                .scaleEffect(reduceMotion ? 1 : 1 + session.level * 0.22)
+            Image(systemName: symbol(for: session.phase))
+                .font(.system(size: 26, weight: .medium))
+                .foregroundStyle(theme.textNormal)
+                .symbolEffect(.variableColor, isActive: session.phase == .thinking)
+        }
+        .frame(width: 96, height: 96)
+        .contentShape(.circle)
+        .scaleEffect(holding && !reduceMotion ? 0.97 : 1)
+        .animation(Motion.enter(holding ? 0.09 : 0.16), value: holding)
+        .glassEffect(.regular.interactive(), in: .circle)
+        .glassEffectID("composer", in: glass)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    // Fires continuously while the finger moves; only the
+                    // first one is the press.
+                    guard !holding else { return }
+                    holding = true
+                    session.press()
+                }
+                .onEnded { _ in
+                    holding = false
+                    session.release()
+                }
+        )
+        .accessibilityLabel("Hold to talk")
+        .accessibilityHint("Hold while you speak, release to send it.")
+        // It stopped being a `Button` when it started being held; it has not
+        // stopped being one to anybody reading the screen, or to the UI tests.
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// Leaving voice mode, which the orb used to do. It cannot any more — the
+    /// orb is the microphone now, and a control that both takes your sentence
+    /// and closes the screen would do the wrong one at the worst moment.
+    private var leave: some View {
         Button { stopTalking() } label: {
-            ZStack {
-                Circle()
-                    .fill(theme.primary.opacity(0.14))
-                    // 1.22 rather than 1.42: at the old size a loud syllable
-                    // made the control jump, which reads as instability rather
-                    // than as listening. The level is already smoothed in the
-                    // session, so this reads it straight — animating a value
-                    // that changes twenty times a second just stacks twenty
-                    // overlapping animations and costs frames.
-                    .scaleEffect(reduceMotion ? 1 : 1 + session.level * 0.22)
-                Image(systemName: symbol(for: session.phase))
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundStyle(theme.textNormal)
-                    .symbolEffect(.variableColor, isActive: session.phase == .thinking)
-            }
-            .frame(width: 96, height: 96)
-            .contentShape(.circle)
+            Image(systemName: "xmark")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(theme.textSubtle)
+                .frame(width: 52, height: 52)
+                .contentShape(.circle)
         }
         .buttonStyle(.pressable)
         .glassEffect(.regular.interactive(), in: .circle)
-        .glassEffectID("composer", in: glass)
+        .glassEffectID("mic", in: glass)
         .accessibilityLabel("Stop talking")
     }
 
     private func symbol(for phase: VoiceSession.Phase) -> String {
         switch phase {
-        case .idle, .listening: "waveform"
+        case .idle: "mic.fill"
+        case .listening: "waveform"
         case .thinking: "ellipsis"
         case .speaking: "speaker.wave.2.fill"
         }

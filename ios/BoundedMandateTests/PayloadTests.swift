@@ -248,8 +248,9 @@ struct CopyTests {
     }
 }
 
-/// Voice mode listens continuously, so the room gets transcribed too. What
-/// separates a person from a passing lorry has to be explicit.
+/// Holding the button does not empty the room — it is still in the recording
+/// alongside you, so what separates a person from a passing lorry has to be
+/// explicit.
 struct SpeechFilterTests {
     @Test func realInstructionsGetThrough() {
         #expect(Voice.isSpeech("Order my usual groceries from Instamart"))
