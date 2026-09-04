@@ -6,7 +6,80 @@ The agent proposes. It cannot authorize itself.
 
 Built for the Razorpay AI Buildathon, Track 01 (AI Growth & Agentic Commerce).
 
+**Demo video:** _the recorded walkthrough goes here._
+
 ---
+
+## In ninety seconds
+
+An agent shops for you. A mandate you set once — *groceries from Instamart every
+four days, keep each under ₹2,000* — decides which of its proposals become
+money, and you are not asked to tap **yes** on each one. **Warden** is the app.
+The engine behind it is the part that rules.
+
+| | |
+|---|---|
+| **The agent** | A real LLM (NVIDIA NIM) with five tools, none of which reaches Razorpay or the policy — and it is free to lie about what is in the cart |
+| **The engine** | Layer 0 provenance → deterministic hard policy → one-directional LLM safety. Four verdicts, idempotency per window, a hash-chained ledger |
+| **The rail** | Razorpay UPI Autopay for the mandate, Standard Checkout for a one-time buy. Both against the live test API, with real payment ids in this file |
+| **The app** | Native SwiftUI, iOS 26. Typing and talking land in the same thread; every verdict is a card you can read |
+| **Tests** | 464 Python and 64 Swift, no network. 7 UI tests drive the built app against a live engine |
+
+Two claims carry the whole thing, and both are
+[structural rather than procedural](#the-two-structural-properties): the policy
+is read from the engine's own store, so a proposal cannot widen the rule it is
+judged against; and the cart is fetched from the merchant, so the agent's own
+account of what it is buying is never the thing evaluated. A third property
+falls out of them — the model can only escalate, never authorize.
+
+Everything else here is detail hanging off those two — starting with
+[three diagrams of how it works](#how-it-works). What is real and what is mocked
+is [written down](#honest-seams) rather than implied, the shortcuts are
+[named with their ceilings](#deliberate-simplifications), and the things that
+went wrong on the way are [collected in one place](#what-broke-at-3am).
+
+## Running it
+
+The engine holds every key; the app ships with none. Copy `.env.example` to
+`.env` and fill in what you have — it runs without any of them, on the offline
+compiler fallback and the mock merchant.
+
+```bash
+uv sync
+set -a; . ./.env; set +a
+./scripts/engine.sh start     # :8117, in a session of its own, survives this shell
+./scripts/engine.sh status    # running is not the same as answering
+```
+
+Then open `ios/BoundedMandate.xcodeproj`, scheme **BoundedMandate**, and run it
+on an iOS 26 simulator. The app looks for the engine on `127.0.0.1:8117`
+(override with the `BMEngineHost` user default).
+
+`BM_COMMERCE` picks the shop: unset means live Instamart if a Swiggy token is
+present and the mock otherwise, and `mock` or `swiggy` mean exactly that. The
+two adversarial scenes — cross-shop comparison, prompt injection — need
+`BM_COMMERCE=mock`, because [a real merchant's catalogue holds neither](#which-shop-and-whether-it-is-answering).
+
+```bash
+uv run pytest -q                       # 464, no network, no key needed
+cd ios && xcodebuild test -scheme BoundedMandate \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+```
+
+The UI tests are on the **BoundedMandateUI** scheme instead, deliberately: they
+need the engine answering on :8117, so they must not be what breaks CI.
+
+## Where to look
+
+| If you want | Read |
+|---|---|
+| the shape of the whole thing | [How it works](#how-it-works) — three diagrams |
+| the security argument | [The two structural properties](#the-two-structural-properties), [Decision model](#decision-model) |
+| what the agent can and cannot do | [The agent](#the-agent), [What stress-testing it turned up](#what-stress-testing-it-turned-up) |
+| plain language becoming authority | [Policy compiler](#policy-compiler), [The model](#the-model) |
+| money actually moving | [Settlement: two legs, not one](#settlement-two-legs-not-one), [The rail: UPI Autopay](#the-rail-upi-autopay) |
+| the interface | [The app](#the-app), [Voice](#voice), [The home screen, and its states](#the-home-screen-and-its-states) |
+| whether to believe any of it | [What broke at 3am](#what-broke-at-3am), [Audit ledger](#audit-ledger), [Honest seams](#honest-seams), [Status](#status) |
 
 ## The problem
 
@@ -23,10 +96,12 @@ That's this.
 
 ## The agent
 
-A real LLM agent shops against the merchant. It holds three tools —
-`search_catalog`, `create_cart`, and one belonging to the engine,
-`request_charge`. There is no tool that reaches Razorpay and none that reveals
-or edits the policy it is judged against. A test asserts that.
+A real LLM agent shops against the merchant. It holds five tools: three that
+shop — `search_catalog`, `create_cart`, and `request_charge`, which belongs to
+the engine rather than to it — one that reads your shopping list, and
+`propose_list`, which drafts one and stores nothing until you confirm. There is
+no tool that reaches Razorpay, none that reveals or edits the policy it is
+judged against, and none that writes the list. Tests assert all three.
 
 It is also free to lie: `request_charge` takes the total the agent *claims*, and
 the engine fetches the real cart to compare. A guard you cannot demonstrate
@@ -182,6 +257,155 @@ never authorize.** Layer 2 (semantic safety) returns concerns, and concerns are
 coerced to `ESCALATE`. There is no return value that approves anything. A fully
 compromised Layer 2 cannot widen the agent's authority; the worst it achieves is
 tripping a flag, which fails safe.
+
+## How it works
+
+Three pictures, because three different questions get asked about this: how a
+proposal becomes a verdict, where the money actually moves, and what the agent
+can reach. The boxes are the code — `decide()` in `bounded_mandate/engine.py`
+runs them in the order drawn.
+
+### One turn, end to end
+
+The two structural properties are the two arrows that arrive from outside the
+agent's reach: the policy comes from the engine's own store, and the cart comes
+from the merchant. Nothing the agent says can redirect either.
+
+```mermaid
+flowchart TD
+    YOU(["you"]) -->|"hold the circle: 'order my usual groceries'"| APP["Warden · SwiftUI"]
+    APP -->|"POST /api/agent"| AGENT["the agent · NVIDIA NIM"]
+    AGENT -->|"request_charge: a mandate id, a cart id, a claimed total"| PROP["POST /api/proposal"]
+
+    STORE[("the policy store<br>the engine's own")]
+    SHOP[("the merchant<br>Instamart, or the mock")]
+
+    subgraph DECIDE["engine.decide() · every path writes to the ledger"]
+        direction TB
+        L0["Layer 0 · provenance<br>fetch the real cart, compare it to the claim"]
+        LOCK["ledger.lock — the read and the write it decides<br>are one critical section"]
+        IDEM["idempotency: sha256 of mandate, window and cart<br>this basket, already authorised in this window?"]
+        L1["Layer 1 · hard policy<br>cap · cadence · merchant · category · address · mandate status"]
+        PROBE["probe detection<br>a pattern of refusals is itself a finding"]
+        L2["Layer 2 · the model<br>returns concerns, and concerns become ESCALATE"]
+        MAX["the verdict is the most severe reason on the pile"]
+        L0 --> LOCK --> IDEM --> L1 --> PROBE
+        PROBE -->|"only if nothing is already fatal"| L2 --> MAX
+    end
+
+    PROP --> L0
+    STORE ==>|"read from here, never from the proposal"| L1
+    SHOP ==>|"fetched from here, never taken from the agent"| L0
+    L0 -.->|"provenance.total_mismatch"| MAX
+
+    MAX --> LEDGER["ledger.append · each entry carries the hash of the one before it"]
+    LEDGER --> ALLOW["ALLOW"]
+    LEDGER --> CLARIFY["CLARIFY"]
+    LEDGER --> ESCALATE["ESCALATE"]
+    LEDGER --> DENY["DENY"]
+
+    ALLOW --> DEBIT["server-side token debit · nobody present"]
+    ESCALATE --> CARD["the home card interrupts you · one tap mints a one-time grant"]
+    DENY --> STOP["nothing is charged, and the card says why in a sentence"]
+
+    classDef allow fill:#1364F1,color:#fff,stroke:none
+    classDef clarify fill:#6038BC,color:#fff,stroke:none
+    classDef escalate fill:#C75300,color:#fff,stroke:none
+    classDef deny fill:#D01E11,color:#fff,stroke:none
+    class ALLOW allow
+    class CLARIFY clarify
+    class ESCALATE escalate
+    class DENY deny
+```
+
+### Where the money is
+
+Three legs, told apart by who is standing there. Only the two with a human in
+them are reachable over HTTP; the one that matters — a debit with nobody
+watching — has no route at all, and a test asserts that none exists.
+
+```mermaid
+flowchart LR
+    subgraph REG["Leg 1 · registration — the user is present, once"]
+        direction TB
+        R1["POST /api/mandate/order<br>a ₹1 UPI Autopay authorisation carrying the token object"]
+        R2["Razorpay Standard Checkout<br>the user approves the mandate in their own UPI app"]
+        R3["POST /api/mandate/verify<br>HMAC-SHA256 over the order id and payment id"]
+        R1 --> R2 --> R3
+    end
+
+    subgraph CHG["Leg 2 · charging — nobody is present, every order"]
+        direction TB
+        C1["decide() returns ALLOW"]
+        C2["debit the authorised token, server-side<br>no HTTP route exists for this"]
+        C1 --> C2
+    end
+
+    subgraph ONE["Leg 3 · the one-time purchase — the user is present, this basket only"]
+        direction TB
+        O1["a refusal, with one button on it"]
+        O2["POST /api/mandate/one-time<br>a second mandate bounded by this cart id, for fifteen minutes"]
+        O3["decide() rules it exactly as it ruled a moment ago"]
+        O4["GET /pay · Standard Checkout"]
+        O5["POST /api/settlement/verify<br>a valid signature AND an open grant for that order"]
+        O1 --> O2 --> O3 --> O4 --> O5
+    end
+
+    GW["razorpay_gateway.py<br>the only module holding the key secret"]
+    RZP[("Razorpay")]
+    R1 --> GW
+    C2 --> GW
+    O4 --> GW
+    O5 --> GW
+    GW --> RZP
+
+    AGENT["the agent"] --x|"no tool reaches any of this"| GW
+```
+
+### What the agent can reach
+
+Two seams, and they are not the same seam. What the *agent* may call is one
+list; what the engine's own merchant adapter may call is another, and neither
+of them contains a way to place an order.
+
+```mermaid
+flowchart LR
+    AGENT["the agent<br>NVIDIA NIM, in a loop"]
+
+    subgraph HAS["the five tools it holds"]
+        direction TB
+        T1["read_shopping_list"]
+        T2["search_catalog"]
+        T3["create_cart"]
+        T4["propose_list — drafts one, stores nothing"]
+        T5["request_charge — the engine's tool, not the agent's"]
+    end
+
+    subgraph GONE["what does not exist, by construction"]
+        direction TB
+        N1["nothing that reaches Razorpay"]
+        N2["nothing that reads or edits the policy it is judged against"]
+        N3["nothing that writes the shopping list"]
+        N4["nothing that mints a one-time grant"]
+    end
+
+    ENGINE["the engine"]
+
+    subgraph MCP["what the engine's adapter may call · ALLOWED_TOOLS"]
+        direction TB
+        M1["get_addresses · search_products · get_cart"]
+        M2["update_cart · clear_cart — both idempotent, so a retry is safe"]
+        M3["checkout · confirm_order — absent on purpose"]
+    end
+
+    AGENT --> HAS --> ENGINE
+    AGENT --x GONE
+    ENGINE --> MCP
+    MCP --> SHOP[("the shop")]
+
+    classDef gone fill:#D01E11,color:#fff,stroke:none
+    class N1,N2,N3,N4,M3 gone
+```
 
 ## Policy compiler
 
@@ -506,17 +730,27 @@ button beside it opens a conversation, and it sits outside the text field
 because it does not send that message; it opens a different way of talking
 altogether, and a control inside the field would promise otherwise.
 
-Voice mode runs the loop itself: listen until you stop talking, transcribe, hand
-it to the agent, speak the verdict, listen again. Nothing is pressed twice. End
-of turn is detected from the input meter — 1.4 s below −38 dB — which is enough
-to think mid-sentence and short enough that finishing one ends your turn.
+**Hold the circle to talk.** The microphone is open while it is held and shut
+the moment it is let go; between turns nothing is recorded, nothing is uploaded
+and nothing reaches the agent. Release is the whole end-of-turn rule, so there
+is no timer to tune and no threshold to be wrong about.
 
-**That timer only starts once you have actually said something.** Counting from
-the first quiet sample counts the pause *before* you speak, which ends the turn
-about a second after the microphone opens and uploads a second and a half of
-empty room, every time. If no first word arrives within twelve seconds the
-screen says so, because silence forever and a broken microphone look identical
-and the user should not have to guess which they are looking at.
+It ran itself before this — listen until 1.4 s below −38 dB, transcribe, answer,
+listen again, nothing pressed twice — and hands-free is the better interaction
+in a quiet room with one person in it. It is the wrong one everywhere else. A
+demo is the clearest case: the person holding the phone is narrating to an
+audience, and every sentence of that narration arrived as an utterance for an
+agent that spends money. Explaining what the app is about is not a shopping
+instruction, and no amount of meter tuning can tell the difference. A press can.
+
+The transcript filter stays, because holding the button does not stop the room:
+a television behind you is still in the recording, and anything bracketed or
+under two words still goes nowhere near the agent.
+
+Holding while it is speaking interrupts it, which is what a person does. Leaving
+voice mode is its own control beside the orb — the orb is the microphone now,
+and one control that both takes your sentence and closes the screen would pick
+the wrong one at the worst moment.
 
 The screen starts almost empty, because before you have said anything there is
 nothing true to show. What it does instead is *react*: the `MeshGradient` is
@@ -896,12 +1130,15 @@ so it is written down as a plan rather than a result.
 link the agent sends you to approve is precisely the confirm dialog this product
 exists to remove. It would make the demo visible and the thesis weaker.
 
-### Running it
+### Running the payment path
 
 ```bash
 set -a; . ./.env; set +a
-uv run uvicorn bounded_mandate.web:app --reload
+uv run uvicorn bounded_mandate.web:app --reload --port 8117
 ```
+
+The port is not incidental: the app looks for the engine on :8117, so the
+default 8000 gives you a healthy server nothing can reach.
 
 Then open `http://127.0.0.1:8000`, edit the rule, press **Read it back** to see
 it compiled, and **Confirm and register** to open Razorpay's modal in test mode.
@@ -1165,7 +1402,7 @@ Append-only JSONL. Every entry carries the SHA-256 of the entry before it, so
 you trust — `Ledger.verify()` raises `ChainBroken` if any past entry was edited,
 reordered or removed. Every decision path writes exactly one entry.
 
-## Running it
+## Running the tests
 
 ```bash
 uv sync
@@ -1194,7 +1431,7 @@ NVIDIA_API_KEY=... uv run pytest tests/test_live.py -v
 
 ## Status
 
-Day 3 of 14. **Phase 1 (engine core) — built.** Layer 0 provenance, Layer 1
+Day 14 of 14. **Phase 1 (engine core) — built.** Layer 0 provenance, Layer 1
 hard policy, Layer 2 one-directional hook, four verdicts, idempotency, the
 hash-chained ledger, the policy compiler with its offline fallback, the
 model-backed Layer 2, the mock merchant, the buyer agent with its adversarial
@@ -1234,7 +1471,15 @@ and every line the user reads carries the merchant's own product photography.
 **Phase 4 (the home screen) — built.** Eight states, each a real engine outcome
 reachable through ordinary actions rather than a demo switch.
 
-Next: an app icon and the recorded walkthrough.
+**Phase 5 (fit to record) — built.** The findings here are the ones only a
+dress rehearsal produces: a paid basket could be authorised a third time after a
+rail failure, approving an escalation never reached the agent's history so it
+argued with itself forever, one flake at Swiggy's gateway read as a shop-wide
+outage, the delivery address reverted on every restart, and voice mode
+transcribed the room. 464 Python tests, 64 Swift tests and 7 UI tests that drive
+the built app.
+
+Next: an app icon, and the recorded walkthrough.
 
 ## Which shop, and whether it is answering
 
@@ -1373,6 +1618,123 @@ out — `status` (revoked / paused) and `expires_at` are engine state, checked
 before any policy evaluation. This is the right shape regardless of rail: the
 boundary is ours to enforce, and revocation must not depend on a sandbox that
 returns success for cancellations it never performed.
+
+## What broke at 3am
+
+Every one of these was real, and every one names the commit that fixed it. They are collected here because a list of features tells you what
+somebody intended and a list of failures tells you what they actually ran.
+
+### A greeting bought the groceries
+
+**"Hey hello", in voice mode, put ₹1,850 of groceries on Razorpay's rails.** The
+transcription was correct and the engine ruled it correctly — squarely inside
+the mandate — and that is the uncomfortable part. **Containment held; restraint
+failed.** The engine bounds *what* may be bought, never *whether anyone asked*,
+and it cannot be made to tell the difference because that is not a question
+about authority. The cause was the agent's own system prompt reading as an
+unconditional procedure — *"Work in this order: 1… 2… 3…"* — with nothing gating
+it on having been asked for anything. It decides first whether it is being asked
+to buy now, and answers small talk with no tools at all, not even reading the
+list. Three live tests pin it, including one that a greeting reaches the engine
+zero times. (`d48480b`)
+
+### The escalation you could dismiss before it happened
+
+**An interrupt could be silenced in advance.** Idempotency keys are
+`sha256(mandate | window | cart)[:32]` — deterministic — and cart ids are
+predictable on both backends, sequential on the mock and a content hash on
+Swiggy. So the key of a decision nobody has made yet is computable, and
+`POST /api/home/seen` accepted it. Demonstrated end to end: predict the next
+cart id, dismiss its key, then make the engine escalate on exactly that cart —
+and the escalation never reaches the screen. No money was ever at risk. What was
+at risk is the only channel by which the user finds out, and **silencing the
+interrupt defeats an escalation as thoroughly as widening the cap would, while
+looking like nothing happened.** A dismissal is now refused unless the decision
+it names is already in the ledger. (`8447a7c`)
+
+### Six ALLOWs for one basket, and a chain that broke itself
+
+**Two things happening at once was enough**, and this app already does two things
+at once: every write route is a sync `def` running in anyio's threadpool, and the
+scheduler adds a thread per tick. `Ledger.append` was read-head → compute →
+write with no lock, so 8 threads × 25 appends produced `CHAIN BROKEN:
+out-of-order seq 0` — the tamper-evidence screen accusing itself, in front of
+whoever was being shown the tamper evidence. The one that moves money was worse:
+`decide` read the charged keys and `_record` wrote much later, so six concurrent
+copies of one cart returned **six ALLOWs**. Locking `append` alone fixed
+nothing — measured, not assumed — because the read that decides sat outside it.
+The whole span from `_history` to `_record` is one critical section now, and the
+ceiling is named where it is paid: the lock is held across the model call, so
+decisions serialise behind a network round trip. Free at one user, wrong at a
+thousand. (`842e415`)
+
+### A signature proves who spoke, not that we asked
+
+**`/api/settlement/verify` checked Razorpay's signature and wrote SETTLED
+regardless of whether the order was one of ours.** The signature is real — it
+proves Razorpay sent the triple — but any valid triple from any other flow on
+the same account verifies exactly as well, including the ₹1 registration. A
+replayed callback wrote an entry matching no grant, and the home screen then
+said *"Paid — your order. It is on its way."* about an order nobody placed. The
+one card in the app that claims money moved was the one card that did not check.
+Authenticity and authorisation are separate questions now, which is the split
+the engine makes everywhere else. The test that covered this had passed without
+ever minting a grant, which is precisely the hole. (`7751f3f`)
+
+### An iPhone is not a grocery because Apple is a fruit
+
+**`Apple iPhone 17 Pro` came back `groceries`, `category_allowed=True`, on a
+₹1,29,900 line.** The category table asked only whether `apple` appeared
+anywhere in the name. The cap stopped that particular basket, which is the wrong
+guard doing the work — a ₹900 Apple Watch band clears both checks. The same hole
+sat under `Rice cooker`, `Egg boiler`, `Milk frother` and `Cheese grater`:
+appliances named after the food they handle. The table is ordered and first match
+wins, so the fix was ordering rather than cleverness. A stress test had already
+written this up as a known limitation — *"no cheap signal separates them"* —
+which was wrong: `frother` is a cheap signal, it just had to be looked at first.
+(`76d6b2b`)
+
+### A rail failure freed a paid basket forever
+
+**A retry of the same cart in the same window is the same idempotency key by
+construction.** A rail failure vetoed that key and nothing ever lifted the veto,
+so: allow, the rail fails, the retry succeeds and is paid — and the paid basket
+could still be authorised a third time, while the charge that actually went
+through never spent the window. Measured, with a cap of one order: the third
+proposal came back ALLOW. The last outcome per key wins now, so the retry's own
+ALLOW counts itself. (`f699da6`)
+
+### Approving the basket ended the argument, and the agent never heard
+
+**Something out of scope escalated, was approved, was paid — and the next turn
+rebuilt the same basket and read the same refusal back, forever.** The approval
+and the payment lived entirely in the card's own state, so the thread never
+recorded either, and the thread is what feeds the agent its history. Its next
+turn was handed a conversation ending on its own refusal, and rebuilding the
+basket is the only move that history supports. The button was the other half of
+why this was reachable at all: a tinted row under a divider, the same shape the
+card uses for rows you only read, so it went untapped — and **a refusal with an
+invisible way out is a refusal with no way out.** Found in a dress rehearsal,
+along with `int(True) == 1` quietly turning `every_days: true` into a daily
+order. (`12ed69a`)
+
+### The room was talking to the agent
+
+**Voice mode listened continuously**, ending a turn on 1.4 s of quiet, which is
+the better interaction in a quiet room with one person in it and the wrong one
+during a recording. Narrating what the app does to an audience arrived as
+utterances for something that spends money, and no amount of meter tuning tells
+narration from instruction. The circle is held now: the microphone is open while
+your finger is down and shut the moment it lifts, so between turns nothing is
+recorded, uploaded or heard. The transcript filter stayed, because holding a
+button does not empty the room.
+
+---
+
+All eight left a runnable check behind. As for how they were found: three came
+from tests written to attack our own surfaces, three from using the app on
+camera, one from an outside review, and one from noticing that a test had passed
+for the wrong reason.
 
 ## Honest seams
 
