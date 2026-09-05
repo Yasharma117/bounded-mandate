@@ -12,12 +12,23 @@ struct Opener: Identifiable {
     static let all: [Opener] = [
         .init(label: "Milk, eggs and bread",
               text: "Order just milk, eggs and brown bread from Instamart."),
+        // "just this once" is not decoration: `create_cart` takes `asked_for`,
+        // and a request that does not say answers `not_said` — which the
+        // harness correctly refuses, sending the agent to ask the cadence
+        // question instead of shopping. Correct behaviour, and a demo that
+        // stalls on it is a demo asking the wrong sentence.
         .init(label: "My usual groceries",
-              text: "Order my usual groceries from Instamart."),
-        .init(label: "Add earbuds and a case",
-              text: "Order my usual groceries, and add the Bluetooth earbuds and a phone case."),
+              text: "Order my usual groceries from Instamart, just this once."),
+        // Names the product the shop actually stocks. "boat earbuds" is a
+        // brand the catalogue does not carry, so the agent correctly stopped
+        // to compare shops and ask which one was meant — right behaviour, and
+        // it derails a beat that wants a cart. One line, one search, and the
+        // refusal that follows is about scope alone: Rs 400 is well inside the
+        // cap, so nothing here is a story about money.
+        .init(label: "Order earbuds",
+              text: "Order the Bluetooth earbuds from Instamart, just this once."),
         .init(label: "Run a compromised agent",
-              text: "Order my usual groceries.", adversarial: true),
+              text: "Order my usual groceries from Instamart, just this once.", adversarial: true),
     ]
 }
 

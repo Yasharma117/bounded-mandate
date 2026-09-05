@@ -12,6 +12,13 @@ struct MandateCard: View {
     let bounds: MandateBounds
     /// A one-time grant is the same object with a life measured in minutes.
     var expiresIn: String?
+    /// Set for a grant, which is bound to one basket by `Policy.cart_id`.
+    ///
+    /// The card listed a cap, a shop and a scope and said nothing about the
+    /// bound that matters most — so the person approving was not told the one
+    /// thing that makes a grant safe to hand out. Without it, "approving this
+    /// basket is not approving one like it" is a claim the screen never makes.
+    var basketBound = false
     var title = "Your standing rule"
 
     /// A grant that expires is used once, not "once every 1 days".
@@ -44,6 +51,9 @@ struct MandateCard: View {
                     DetailRow(label: "At", value: bounds.merchants.joined(separator: ", "))
                     DetailRow(label: "Buying", value: bounds.categories.joined(separator: ", "))
                     DetailRow(label: "How often", value: cadence)
+                    if basketBound {
+                        DetailRow(label: "Only", value: "this basket, not one like it")
+                    }
                     if let expiresIn {
                         DetailRow(label: "Expires", value: expiresIn, color: theme.orchid)
                     }

@@ -74,7 +74,7 @@ struct BasketSheet: View {
                         .foregroundStyle(line.flagged ? theme.textNormal : theme.textSubtle)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
-                    if let note = line.note {
+                    if let note = line.noteDetail {
                         Text(note)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(tint)
@@ -88,6 +88,10 @@ struct BasketSheet: View {
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 56)
+            // The line that caused the verdict should be findable at a glance,
+            // in a basket of thirteen. Sorting it to the top is not enough on
+            // its own — the eye needs somewhere to land.
+            .background(line.flagged ? tint.opacity(0.12) : .clear)
             .contentShape(.rect)
         }
         .buttonStyle(.pressable)

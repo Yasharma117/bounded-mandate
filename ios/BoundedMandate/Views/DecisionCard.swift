@@ -68,6 +68,7 @@ struct DecisionCard: View {
                 MandateCard(
                     bounds: granted.grant.bounds,
                     expiresIn: granted.grant.expiresIn,
+                    basketBound: granted.grant.cartID != nil,
                     title: "One-time approval"
                 )
                 .arrives(reduceMotion)
@@ -410,6 +411,7 @@ struct DecisionCard: View {
                     }
                     .padding(.horizontal, 18)
                     .padding(.vertical, 6)
+                    .background(line.flagged ? tint.opacity(0.12) : .clear)
                 }
             }
             .padding(.bottom, 8)

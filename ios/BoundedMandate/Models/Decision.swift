@@ -69,10 +69,20 @@ struct CartLine: Codable, Hashable, Sendable, Identifiable {
     var id: String { name }
     var flagged: Bool { offScope || unclassified }
 
+    /// The badge on a card row, where there is only horizontal room.
+    ///
+    /// It read `electronics` — the category alone, which names the item rather
+    /// than the problem. A reader scanning thirteen lines for the one that
+    /// caused a DENY should not have to know the rule by heart to spot it.
     var note: String? {
-        if offScope { return category }
+        if offScope { return "not in your rule" }
         if unclassified { return "unclassified" }
         return nil
+    }
+
+    /// The same thing where there is vertical room, keeping the category.
+    var noteDetail: String? {
+        offScope ? "not in your rule · \(category)" : note
     }
 
     enum CodingKeys: String, CodingKey {
