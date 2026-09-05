@@ -6,7 +6,7 @@ The agent proposes. It cannot authorize itself.
 
 Built for the Razorpay AI Buildathon, Track 01 (AI Growth & Agentic Commerce).
 
-**Demo video:** _the recorded walkthrough goes here._
+**Demo video:** https://cap.so/s/js1hn1mfjsrptfb
 
 ---
 
