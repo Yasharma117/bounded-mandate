@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bounded Mandate · Approve this one purchase</title>
+<title>Warden · Approve this one purchase</title>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <style>
   :root{--bg:#02042B;--surface:#0B1039;--line:#1E2559;--ink:#EEF1FF;--muted:#8E96C8;
@@ -138,7 +138,7 @@ $("pay").onclick = () => {
   const rzp = new Razorpay({
     key: grant.key_id, order_id: grant.order_id,
     amount: grant.amount_paise, currency: "INR",
-    name: "Bounded Mandate", description: "One-time approved purchase",
+    name: "Warden", description: "One-time approved purchase",
     // Contact details from the server, not baked into this page.
     prefill: grant.prefill || {},
     // Fetches this customer's saved cards, so a card entered once is offered

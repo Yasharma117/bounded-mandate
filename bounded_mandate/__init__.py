@@ -1,4 +1,4 @@
-"""Bounded Mandate — an authorization layer between an autonomous agent and money."""
+"""Warden — an authorization layer between an autonomous agent and money."""
 
 from .engine import (
     Cart,

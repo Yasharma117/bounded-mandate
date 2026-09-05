@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bounded Mandate · Register</title>
+<title>Warden · Register</title>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <style>
   :root{
@@ -141,7 +141,7 @@ $("register").onclick = async () => {
       amount: order.amount,
       currency: order.currency,
       recurring: "1",
-      name: "Bounded Mandate",
+      name: "Warden",
       description: `Authorise up to ${rupees(bounds.per_txn_max_paise)} per order`,
       handler: async (response) => {
         try {

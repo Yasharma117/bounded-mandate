@@ -81,7 +81,7 @@ def register(metadata: dict, redirect_uri: str) -> str:
     response = httpx.post(
         metadata["registration_endpoint"],
         json={
-            "client_name": "Bounded Mandate",
+            "client_name": "Warden",
             "redirect_uris": [redirect_uri],
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],

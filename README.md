@@ -1,4 +1,4 @@
-# Bounded Mandate
+# Warden
 
 **An authorization layer between an autonomous buying agent and money.**
 
@@ -243,7 +243,7 @@ Stated here because they will be stated in the demo video too:
   leg is a local mock merchant behind an adapter interface.
 - **The Razorpay charge and the commerce order are unrelated money flows.** The
   charge debits a test mandate on our own merchant account. It does not pay for
-  any goods, and no goods change hands. Bounded Mandate is the *payer-side
+  any goods, and no goods change hands. Warden is the *payer-side
   authorization*; the single arrow in the architecture diagram is not allowed to
   imply the two legs are one.
 - Aggregate rolling-window spend limits and the full ledger state machine are

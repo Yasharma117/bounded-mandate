@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bounded Mandate · Agent run</title>
+<title>Warden · Agent run</title>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <style>
   :root{--bg:#02042B;--surface:#0B1039;--line:#1E2559;--ink:#EEF1FF;--muted:#8E96C8;
@@ -127,10 +127,10 @@ $("pay").onclick = () => {
   const rzp = new Razorpay({
     key: pending.key_id, order_id: pending.order_id,
     amount: pending.real_total_paise, currency: "INR",
-    name: "Bounded Mandate", description: "Authorised grocery order",
+    name: "Warden", description: "Authorised grocery order",
     // The same placeholders the server uses for `DEMO_CUSTOMER`. A real name,
     // email and phone number have no business in a committed file.
-    prefill: { name:"Bounded Mandate Demo", email:"demo@bounded-mandate.test", contact:"9999999999" },
+    prefill: { name:"Warden Demo", email:"demo@warden.test", contact:"9999999999" },
     handler: async (r) => {
       try {
         const out = await post("/api/settlement/verify", r);

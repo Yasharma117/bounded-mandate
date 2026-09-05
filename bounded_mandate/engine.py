@@ -1,4 +1,4 @@
-"""Bounded Mandate — the authorization engine.
+"""Warden — the authorization engine.
 
 The agent proposes; this decides. Two structural properties do the load-bearing
 work, and both are enforced by the shape of the code rather than by discipline:

@@ -76,7 +76,7 @@ async def _lifespan(_: FastAPI):
                 await task
 
 
-app = FastAPI(title="Bounded Mandate", docs_url="/api/docs", lifespan=_lifespan)
+app = FastAPI(title="Warden", docs_url="/api/docs", lifespan=_lifespan)
 
 
 @dataclass
@@ -391,7 +391,7 @@ def load_grants() -> None:
 # customer that no token belongs to. That is a card the reader has to enter
 # again, traded for tidiness.
 DEMO_CUSTOMER = {
-    "name": "Bounded Mandate Demo",
+    "name": "Warden Demo",
     "email": "demo@bounded-mandate.test",
     "contact": "9999999999",
 }
@@ -461,7 +461,7 @@ def _settle(decision, cart_items: int) -> dict:
         order_id = gw.create_charge_order(
             amount_paise=decision.total_paise,
             idempotency_key=decision.idempotency_key,
-            description=f"Bounded Mandate · {cart_items} items",
+            description=f"Warden · {cart_items} items",
             customer_id=customer_id(gw),
         )
     except (GatewayError, HTTPException) as exc:
